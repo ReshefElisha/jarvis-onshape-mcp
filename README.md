@@ -14,16 +14,6 @@ This MCP server provides comprehensive programmatic access to Onshape's REST API
 - **Configuration Support** - Work with Onshape configuration parameters
 - **Part Studio Management** - Create and manage Part Studios programmatically
 
-### 🎯 What Makes This Different
-
-Unlike the existing `onshape-mcp-server`, this implementation:
-
-- ✅ Properly constructs feature JSON (sketches, extrudes, etc.)
-- ✅ Supports variable tables and parametric references
-- ✅ Provides high-level builders that hide complex BTFeature structures
-- ✅ Includes comprehensive error handling
-- ✅ Well-documented and maintainable code structure
-
 ## Installation
 
 ### Prerequisites
