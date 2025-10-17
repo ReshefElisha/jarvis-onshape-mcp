@@ -7,6 +7,7 @@ from .client import OnshapeClient
 
 class Variable(BaseModel):
     """Represents a variable in an Onshape variable table."""
+
     name: str
     expression: str
     description: Optional[str] = None
@@ -24,10 +25,7 @@ class VariableManager:
         self.client = client
 
     async def get_variables(
-        self,
-        document_id: str,
-        workspace_id: str,
-        element_id: str
+        self, document_id: str, workspace_id: str, element_id: str
     ) -> List[Variable]:
         """Get all variables from a Part Studio.
 
@@ -44,11 +42,13 @@ class VariableManager:
 
         variables = []
         for var_data in response:
-            variables.append(Variable(
-                name=var_data.get("name", ""),
-                expression=var_data.get("expression", ""),
-                description=var_data.get("description")
-            ))
+            variables.append(
+                Variable(
+                    name=var_data.get("name", ""),
+                    expression=var_data.get("expression", ""),
+                    description=var_data.get("description"),
+                )
+            )
 
         return variables
 
@@ -59,7 +59,7 @@ class VariableManager:
         element_id: str,
         name: str,
         expression: str,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Set or update a variable in a Part Studio.
 
@@ -76,10 +76,7 @@ class VariableManager:
         """
         path = f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/variables"
 
-        data = {
-            "name": name,
-            "expression": expression
-        }
+        data = {"name": name, "expression": expression}
 
         if description:
             data["description"] = description
@@ -87,10 +84,7 @@ class VariableManager:
         return await self.client.post(path, data=data)
 
     async def get_configuration_definition(
-        self,
-        document_id: str,
-        workspace_id: str,
-        element_id: str
+        self, document_id: str, workspace_id: str, element_id: str
     ) -> Dict[str, Any]:
         """Get configuration definition for an element.
 

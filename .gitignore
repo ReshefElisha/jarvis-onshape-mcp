@@ -24,6 +24,7 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .vscode/
@@ -35,10 +36,14 @@ ENV/
 # Environment variables
 .env
 .env.local
+.env.*
 
 # Credentials
 credentials.json
 .credentials.json
+*_credentials.json
+*.key
+*.pem
 
 # OS
 .DS_Store
@@ -47,4 +52,18 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+coverage.xml
+.tox/
+.nox/
+*.cover
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+
+docs/PARTS_ASSEMBLY_TOOLS.md
+docs/DISPLAY_CABINETS_ANALYSIS_SUMMARY.md
+examples/

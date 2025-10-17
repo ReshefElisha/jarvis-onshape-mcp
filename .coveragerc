@@ -1,0 +1,46 @@
+# Coverage.py configuration
+
+[run]
+source = onshape_mcp
+omit =
+    */tests/*
+    */test_*.py
+    */__pycache__/*
+    */site-packages/*
+    */.venv/*
+    */venv/*
+
+branch = True
+parallel = True
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+
+# Fail if coverage is below threshold
+fail_under = 80
+
+exclude_lines =
+    # Standard pragma
+    pragma: no cover
+
+    # Defensive programming
+    raise AssertionError
+    raise NotImplementedError
+
+    # Non-runnable code
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    @abc.abstractmethod
+
+    # Debugging code
+    def __repr__
+    def __str__
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml
