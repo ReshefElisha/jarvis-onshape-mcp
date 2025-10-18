@@ -174,3 +174,88 @@ class TestPartStudioManager:
             )
 
         assert "API Error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_front(self, partstudio_manager, sample_document_ids):
+        """Test getting Front plane ID."""
+        plane_id = await partstudio_manager.get_plane_id(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "Front",
+        )
+
+        assert plane_id == "JCC"
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_top(self, partstudio_manager, sample_document_ids):
+        """Test getting Top plane ID."""
+        plane_id = await partstudio_manager.get_plane_id(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "Top",
+        )
+
+        assert plane_id == "JDC"
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_right(self, partstudio_manager, sample_document_ids):
+        """Test getting Right plane ID."""
+        plane_id = await partstudio_manager.get_plane_id(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "Right",
+        )
+
+        assert plane_id == "JEC"
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_caching(self, partstudio_manager, sample_document_ids):
+        """Test that plane IDs are cached."""
+        # First call - should compute and cache
+        plane_id1 = await partstudio_manager.get_plane_id(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "Front",
+        )
+
+        # Second call - should return cached value
+        plane_id2 = await partstudio_manager.get_plane_id(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "Front",
+        )
+
+        assert plane_id1 == plane_id2 == "JCC"
+
+        # Verify cache is populated
+        cache_key = f"{sample_document_ids['document_id']}_{sample_document_ids['workspace_id']}_{sample_document_ids['element_id']}_Front"
+        assert cache_key in partstudio_manager._plane_id_cache
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_invalid_plane(self, partstudio_manager, sample_document_ids):
+        """Test that invalid plane name raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid plane name"):
+            await partstudio_manager.get_plane_id(
+                sample_document_ids["document_id"],
+                sample_document_ids["workspace_id"],
+                sample_document_ids["element_id"],
+                "InvalidPlane",
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_plane_id_cache_different_contexts(self, partstudio_manager):
+        """Test that different documents/workspaces get different cache entries."""
+        # Different document
+        plane_id1 = await partstudio_manager.get_plane_id("doc1", "ws1", "elem1", "Front")
+
+        # Different workspace
+        plane_id2 = await partstudio_manager.get_plane_id("doc1", "ws2", "elem1", "Front")
+
+        # Both should be same value but cached separately
+        assert plane_id1 == plane_id2 == "JCC"
+        assert len(partstudio_manager._plane_id_cache) == 2

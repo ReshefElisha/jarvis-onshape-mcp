@@ -113,8 +113,8 @@ class TestExtrudeBuilder:
 
         result = extrude.build()
 
-        # Verify top-level structure
-        assert result["btType"] == "BTMFeature-134"
+        # Verify top-level structure (BTFeatureDefinitionCall wrapper)
+        assert result["btType"] == "BTFeatureDefinitionCall-1406"
         assert "feature" in result
 
         feature = result["feature"]
@@ -138,8 +138,11 @@ class TestExtrudeBuilder:
         assert len(entities_param["queries"]) > 0
 
         query = entities_param["queries"][0]
-        assert sketch_id in query["queryStatement"]
-        assert "qSketchRegion" in query["queryStatement"]
+        # The actual implementation uses "queryString" field with qSketchRegion
+        assert query["btType"] == "BTMIndividualSketchRegionQuery-140"
+        assert "queryString" in query
+        assert sketch_id in query["queryString"]
+        assert "qSketchRegion" in query["queryString"]
 
     def test_build_includes_operation_type_parameter(self):
         """Test that build() includes operation type parameter."""

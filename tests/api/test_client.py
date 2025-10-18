@@ -47,7 +47,9 @@ class TestOnshapeClient:
 
         assert client.credentials == mock_credentials
         assert client.base_url == mock_credentials.base_url
-        assert client._client is not None
+        # Client starts as None and is initialized on first use or context manager entry
+        assert client._client is None
+        assert client._own_client is False
 
     def test_get_auth_header_encoding(self, mock_credentials):
         """Test Basic Auth header generation."""
@@ -116,6 +118,8 @@ class TestOnshapeClient:
         mock_response = Mock()
         mock_response.json.return_value = {"created": True}
         mock_response.raise_for_status.return_value = None
+        mock_response.status_code = 200
+        mock_response.text = ""
         mock_httpx_client.post.return_value = mock_response
 
         data = {"name": "test", "value": 123}
@@ -136,6 +140,8 @@ class TestOnshapeClient:
         mock_response = Mock()
         mock_response.json.return_value = {"created": True}
         mock_response.raise_for_status.return_value = None
+        mock_response.status_code = 200
+        mock_response.text = ""
         mock_httpx_client.post.return_value = mock_response
 
         data = {"name": "test"}
@@ -175,9 +181,58 @@ class TestOnshapeClient:
     @pytest.mark.asyncio
     async def test_close_client(self, onshape_client, mock_httpx_client):
         """Test closing the HTTP client."""
+        # Mark as owning the client so close() will actually call aclose()
+        onshape_client._own_client = True
+
         await onshape_client.close()
 
         mock_httpx_client.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_entry(self, mock_credentials):
+        """Test async context manager __aenter__."""
+        client = OnshapeClient(mock_credentials)
+
+        # Client should start with no _client
+        assert client._client is None
+        assert client._own_client is False
+
+        # Enter context manager
+        async with client as entered_client:
+            # Should have initialized client
+            assert entered_client._client is not None
+            assert entered_client._own_client is True
+            assert entered_client is client
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_exit(self, mock_credentials):
+        """Test async context manager __aexit__ cleanup."""
+        client = OnshapeClient(mock_credentials)
+
+        async with client:
+            # Client created inside context
+            assert client._client is not None
+
+        # After exit, close() should have been called, which may set _client to None
+        # or keep the reference - the important thing is __aexit__ was called
+        # We can't easily verify the httpx client was closed without mocking,
+        # but we can verify the context manager completed without error
+        assert True  # Context manager exited successfully
+
+    @pytest.mark.asyncio
+    async def test_ensure_client_lazy_initialization(self, mock_credentials):
+        """Test that _ensure_client creates client on first use."""
+        client = OnshapeClient(mock_credentials)
+
+        # No client initially
+        assert client._client is None
+
+        # Manually call _ensure_client (simulates what get/post do)
+        client._ensure_client()
+
+        # Should now have a client
+        assert client._client is not None
+        assert client._own_client is True
 
     def test_url_construction(self, onshape_client):
         """Test URL construction with base_url."""

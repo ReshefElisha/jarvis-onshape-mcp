@@ -24,6 +24,8 @@ def mock_httpx_client():
     mock_response = Mock()
     mock_response.json.return_value = {"success": True}
     mock_response.raise_for_status.return_value = None
+    mock_response.status_code = 200  # Add status_code for POST/DELETE error logging
+    mock_response.text = ""  # Add text attribute for error logging
 
     mock_client.get.return_value = mock_response
     mock_client.post.return_value = mock_response
