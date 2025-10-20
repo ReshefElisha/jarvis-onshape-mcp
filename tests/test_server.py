@@ -1,13 +1,12 @@
 """Tests for the MCP server."""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 import httpx
 from mcp.types import Tool, TextContent
 
 # Import the server module components
-from onshape_mcp.server import app, list_tools, call_tool
-from onshape_mcp.api.client import OnshapeClient, OnshapeCredentials
+from onshape_mcp.server import list_tools, call_tool
 from onshape_mcp.api.variables import Variable
 from onshape_mcp.api.documents import DocumentInfo, ElementInfo
 
