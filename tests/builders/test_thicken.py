@@ -58,7 +58,7 @@ class TestThickenBuilder:
     def test_set_thickness_with_variable(self):
         """Test setting thickness with variable reference."""
         thicken = ThickenBuilder(name="Test", sketch_feature_id="sketch1")
-        result = thicken.set_thickness(0.75, variable_name="panel_thickness")
+        thicken.set_thickness(0.75, variable_name="panel_thickness")
 
         assert thicken.thickness_value == 0.75
         assert thicken.thickness_variable == "panel_thickness"

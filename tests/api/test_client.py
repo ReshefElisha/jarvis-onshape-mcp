@@ -95,7 +95,7 @@ class TestOnshapeClient:
         mock_httpx_client.get.return_value = mock_response
 
         params = {"key": "value", "limit": 10}
-        result = await onshape_client.get("/api/test", params=params)
+        await onshape_client.get("/api/test", params=params)
 
         call_args = mock_httpx_client.get.call_args
         assert call_args.kwargs["params"] == params
@@ -146,7 +146,7 @@ class TestOnshapeClient:
 
         data = {"name": "test"}
         params = {"validate": True}
-        result = await onshape_client.post("/api/create", data=data, params=params)
+        await onshape_client.post("/api/create", data=data, params=params)
 
         call_args = mock_httpx_client.post.call_args
         assert call_args.kwargs["params"] == params
@@ -173,7 +173,7 @@ class TestOnshapeClient:
         mock_httpx_client.delete.return_value = mock_response
 
         params = {"force": True}
-        result = await onshape_client.delete("/api/resource/123", params=params)
+        await onshape_client.delete("/api/resource/123", params=params)
 
         call_args = mock_httpx_client.delete.call_args
         assert call_args.kwargs["params"] == params
@@ -239,5 +239,4 @@ class TestOnshapeClient:
         assert onshape_client.base_url == "https://test.onshape.com"
 
         # Verify path is appended correctly
-        expected_url = "https://test.onshape.com/api/test"
         # This is tested indirectly through the get/post/delete methods

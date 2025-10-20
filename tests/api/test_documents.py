@@ -158,7 +158,7 @@ class TestDocumentManager:
         """Test listing documents with custom parameters."""
         onshape_client.get = AsyncMock(return_value=sample_documents_response)
 
-        documents = await document_manager.list_documents(
+        await document_manager.list_documents(
             filter_type="1", sort_by="name", sort_order="asc", limit=10, offset=5
         )
 

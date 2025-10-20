@@ -63,7 +63,7 @@ class TestExtrudeBuilder:
     def test_set_depth_with_variable(self):
         """Test setting depth with variable reference."""
         extrude = ExtrudeBuilder()
-        result = extrude.set_depth(2.0, variable_name="extrude_depth")
+        extrude.set_depth(2.0, variable_name="extrude_depth")
 
         assert extrude.depth == 2.0
         assert extrude.depth_variable == "extrude_depth"

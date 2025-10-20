@@ -145,7 +145,7 @@ class TestVariableManager:
         """Test setting a variable without description."""
         onshape_client.post = AsyncMock(return_value={"success": True})
 
-        result = await variable_manager.set_variable(
+        await variable_manager.set_variable(
             sample_document_ids["document_id"],
             sample_document_ids["workspace_id"],
             sample_document_ids["element_id"],
