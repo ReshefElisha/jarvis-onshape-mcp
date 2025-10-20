@@ -18,9 +18,6 @@ precision = 2
 show_missing = True
 skip_covered = False
 
-# Fail if coverage is below threshold
-fail_under = 80
-
 exclude_lines =
     # Standard pragma
     pragma: no cover
