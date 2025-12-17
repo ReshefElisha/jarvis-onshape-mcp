@@ -336,6 +336,39 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId"],
             },
         ),
+        Tool(
+            name="create_document",
+            description="Create a new Onshape document",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name for the new document"},
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description for the document",
+                    },
+                    "isPublic": {
+                        "type": "boolean",
+                        "description": "Whether the document should be public",
+                        "default": False,
+                    },
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="create_part_studio",
+            description="Create a new Part Studio in an existing document",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "name": {"type": "string", "description": "Name for the new Part Studio"},
+                },
+                "required": ["documentId", "workspaceId", "name"],
+            },
+        ),
     ]
 
 
@@ -985,6 +1018,73 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 TextContent(
                     type="text",
                     text=f"Error getting assembly: {str(e)}",
+                )
+            ]
+
+    elif name == "create_document":
+        try:
+            doc = await document_manager.create_document(
+                name=arguments["name"],
+                description=arguments.get("description"),
+                is_public=arguments.get("isPublic", False),
+            )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Created document '{doc.name}'\n"
+                    f"Document ID: {doc.id}\n"
+                    f"Use this ID with other commands to work with this document.",
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating document: {e.response.status_code}")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating document: API returned {e.response.status_code}. Check your API credentials and permissions.",
+                )
+            ]
+        except Exception as e:
+            logger.exception("Unexpected error creating document")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating document: {str(e)}",
+                )
+            ]
+
+    elif name == "create_part_studio":
+        try:
+            result = await partstudio_manager.create_part_studio(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                name=arguments["name"],
+            )
+
+            element_id = result.get("id", "unknown")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Created Part Studio '{arguments['name']}'\n"
+                    f"Element ID: {element_id}\n"
+                    f"Use this ID with sketch and feature commands.",
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating Part Studio: {e.response.status_code}")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating Part Studio: API returned {e.response.status_code}. Check the document/workspace IDs.",
+                )
+            ]
+        except Exception as e:
+            logger.exception("Unexpected error creating Part Studio")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating Part Studio: {str(e)}",
                 )
             ]
 
