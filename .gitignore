@@ -66,4 +66,4 @@ coverage.xml
 
 docs/PARTS_ASSEMBLY_TOOLS.md
 docs/DISPLAY_CABINETS_ANALYSIS_SUMMARY.md
-examples/
+examples/.venv/
