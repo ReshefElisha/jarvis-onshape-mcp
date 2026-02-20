@@ -1,0 +1,22 @@
+changelog:
+  categories:
+    - title: New Features
+      labels:
+        - enhancement
+        - feature
+    - title: Bug Fixes
+      labels:
+        - bug
+        - fix
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: CI & Build
+      labels:
+        - ci
+        - build
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"

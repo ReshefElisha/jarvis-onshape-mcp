@@ -1,0 +1,132 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: develop
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Calculate new version
+      id: version
+      run: |
+        CURRENT=$(python -c "
+        import re
+        with open('pyproject.toml') as f:
+            match = re.search(r'version = \"(.+?)\"', f.read())
+            print(match.group(1))
+        ")
+        echo "current=$CURRENT"
+
+        IFS='.' read -r major minor patch <<< "$CURRENT"
+        case "${{ inputs.bump_type }}" in
+          major) major=$((major + 1)); minor=0; patch=0 ;;
+          minor) minor=$((minor + 1)); patch=0 ;;
+          patch) patch=$((patch + 1)) ;;
+        esac
+        NEW="${major}.${minor}.${patch}"
+
+        echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+        echo "new=$NEW" >> "$GITHUB_OUTPUT"
+        echo "Bumping $CURRENT -> $NEW (${{ inputs.bump_type }})"
+
+    - name: Create release branch
+      run: |
+        git checkout -b release/v${{ steps.version.outputs.new }}
+
+    - name: Bump version in pyproject.toml
+      run: |
+        python -c "
+        import re
+        with open('pyproject.toml', 'r') as f:
+            content = f.read()
+        content = re.sub(
+            r'version = \"${{ steps.version.outputs.current }}\"',
+            'version = \"${{ steps.version.outputs.new }}\"',
+            content,
+            count=1
+        )
+        with open('pyproject.toml', 'w') as f:
+            f.write(content)
+        "
+
+    - name: Bump version in __init__.py
+      run: |
+        python -c "
+        with open('onshape_mcp/__init__.py', 'r') as f:
+            content = f.read()
+        content = content.replace(
+            '__version__ = \"${{ steps.version.outputs.current }}\"',
+            '__version__ = \"${{ steps.version.outputs.new }}\"'
+        )
+        with open('onshape_mcp/__init__.py', 'w') as f:
+            f.write(content)
+        "
+
+    - name: Generate changelog entry
+      id: changelog
+      run: |
+        LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -n "$LAST_TAG" ]; then
+          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+        else
+          COMMITS=$(git log --pretty=format:"- %s" --no-merges)
+        fi
+        # Save to file for the PR body
+        echo "$COMMITS" > /tmp/commits.txt
+
+    - name: Commit version bump
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add pyproject.toml onshape_mcp/__init__.py
+        git commit -m "chore: bump version to ${{ steps.version.outputs.new }}"
+
+    - name: Push release branch
+      run: |
+        git push origin release/v${{ steps.version.outputs.new }}
+
+    - name: Create PR to main
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        COMMITS=$(cat /tmp/commits.txt)
+        gh pr create \
+          --base main \
+          --head release/v${{ steps.version.outputs.new }} \
+          --title "Release v${{ steps.version.outputs.new }}" \
+          --label "release" \
+          --body "$(cat <<EOF
+        ## Release v${{ steps.version.outputs.new }}
+
+        **Version bump:** ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }} (${{ inputs.bump_type }})
+
+        ### Changes since v${{ steps.version.outputs.current }}
+
+        ${COMMITS}
+
+        ---
+
+        > Merging this PR into \`main\` will automatically create a git tag and GitHub Release.
+        EOF
+        )"

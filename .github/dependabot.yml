@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+      - "ci"
+    open-pull-requests-limit: 5

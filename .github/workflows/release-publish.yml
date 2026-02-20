@@ -1,0 +1,74 @@
+name: Publish Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Read version
+      id: version
+      run: |
+        VERSION=$(python -c "
+        import re
+        with open('pyproject.toml') as f:
+            match = re.search(r'version = \"(.+?)\"', f.read())
+            print(match.group(1))
+        ")
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Version: $VERSION"
+
+    - name: Create git tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v${{ steps.version.outputs.version }}" -m "v${{ steps.version.outputs.version }}"
+        git push origin "v${{ steps.version.outputs.version }}"
+
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "v${{ steps.version.outputs.version }}" \
+          --title "v${{ steps.version.outputs.version }}" \
+          --generate-notes \
+          --latest
+
+    - name: Create backmerge PR to develop
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh pr create \
+          --base develop \
+          --head main \
+          --title "chore: merge v${{ steps.version.outputs.version }} back to develop" \
+          --body "$(cat <<EOF
+        Automated backmerge after release v${{ steps.version.outputs.version }}.
+
+        This syncs the version bump and any release changes back into \`develop\`.
+        EOF
+        )"
+
+    - name: Clean up release branch
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        BRANCH="${{ github.event.pull_request.head.ref }}"
+        if [[ "$BRANCH" == release/* ]]; then
+          git push origin --delete "$BRANCH" || true
+        fi
