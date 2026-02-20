@@ -41,6 +41,11 @@ target-version = ['py310']
 line-length = 100
 target-version = "py310"
 
+[tool.ruff.lint.per-file-ignores]
+# load_dotenv() must run before local imports read env vars
+"onshape_mcp/server.py" = ["E402"]
+"run_mcp_server.py" = ["E402"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]

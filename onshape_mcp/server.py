@@ -11,10 +11,10 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from loguru import logger
 
-# Load environment variables from .env file
-# Look for .env in the package directory (where this server.py lives)
+# Load environment variables from .env file before local imports read them.
+# Look for .env in the package directory (where this server.py lives).
 _package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(_package_dir, '.env'))
+load_dotenv(os.path.join(_package_dir, ".env"))
 
 from .api.client import OnshapeClient, OnshapeCredentials
 from .api.partstudio import PartStudioManager
