@@ -66,4 +66,6 @@ coverage.xml
 
 docs/PARTS_ASSEMBLY_TOOLS.md
 docs/DISPLAY_CABINETS_ANALYSIS_SUMMARY.md
-examples/.venv/
+
+# Exclude development scripts used for internal testing and debugging
+dev_scripts/

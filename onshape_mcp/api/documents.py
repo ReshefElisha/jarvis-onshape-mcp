@@ -289,10 +289,9 @@ class DocumentManager:
             DocumentInfo for the created document
         """
         data: Dict[str, Any] = {"name": name}
-        if description:
+        if description is not None:
             data["description"] = description
-        if is_public:
-            data["isPublic"] = is_public
+        data["isPublic"] = is_public
 
         response = await self.client.post("/api/v10/documents", data=data)
 
