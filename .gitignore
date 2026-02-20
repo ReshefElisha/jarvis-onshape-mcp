@@ -66,4 +66,9 @@ coverage.xml
 
 docs/PARTS_ASSEMBLY_TOOLS.md
 docs/DISPLAY_CABINETS_ANALYSIS_SUMMARY.md
-examples/
+
+# Exclude development scripts used for internal testing and debugging
+dev_scripts/
+
+# Auto Claude data directory
+.auto-claude/

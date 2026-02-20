@@ -67,6 +67,8 @@ class TestListTools:
         assert "get_document" in tool_names
         assert "get_document_summary" in tool_names
         assert "find_part_studios" in tool_names
+        assert "create_document" in tool_names
+        assert "create_part_studio" in tool_names
 
     @pytest.mark.asyncio
     async def test_list_tools_includes_partstudio_tools(self):
@@ -765,6 +767,174 @@ class TestGetAssembly:
         }
 
         result = await call_tool("get_assembly", arguments)
+
+        assert isinstance(result, list)
+        assert "Error" in result[0].text
+
+
+class TestCreateDocumentTool:
+    """Test create_document tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_create_document_success(self, mock_document_manager):
+        """Test successful document creation via tool."""
+        from datetime import datetime
+
+        mock_doc = DocumentInfo(
+            id="new_doc_123",
+            name="New Document",
+            createdAt=datetime(2024, 1, 1),
+            modifiedAt=datetime(2024, 1, 1),
+            ownerId="user1",
+        )
+        mock_document_manager.create_document = AsyncMock(return_value=mock_doc)
+
+        arguments = {"name": "New Document"}
+
+        result = await call_tool("create_document", arguments)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert "New Document" in result[0].text
+        assert "new_doc_123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_create_document_with_options(self, mock_document_manager):
+        """Test document creation with description and isPublic."""
+        from datetime import datetime
+
+        mock_doc = DocumentInfo(
+            id="new_doc_456",
+            name="Public Doc",
+            createdAt=datetime(2024, 1, 1),
+            modifiedAt=datetime(2024, 1, 1),
+            ownerId="user1",
+            public=True,
+            description="A public document",
+        )
+        mock_document_manager.create_document = AsyncMock(return_value=mock_doc)
+
+        arguments = {
+            "name": "Public Doc",
+            "description": "A public document",
+            "isPublic": True,
+        }
+
+        result = await call_tool("create_document", arguments)
+
+        assert isinstance(result, list)
+        assert "Public Doc" in result[0].text
+        mock_document_manager.create_document.assert_called_once_with(
+            name="Public Doc",
+            description="A public document",
+            is_public=True,
+        )
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_create_document_http_error(self, mock_document_manager):
+        """Test document creation with HTTP error."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_response.text = "Forbidden"
+        mock_document_manager.create_document = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Forbidden", request=Mock(), response=mock_response
+            )
+        )
+
+        arguments = {"name": "Forbidden Doc"}
+
+        result = await call_tool("create_document", arguments)
+
+        assert isinstance(result, list)
+        assert "Error" in result[0].text
+        assert "403" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_create_document_generic_error(self, mock_document_manager):
+        """Test document creation with generic error."""
+        mock_document_manager.create_document = AsyncMock(
+            side_effect=Exception("Unexpected error")
+        )
+
+        arguments = {"name": "Error Doc"}
+
+        result = await call_tool("create_document", arguments)
+
+        assert isinstance(result, list)
+        assert "Error" in result[0].text
+
+
+class TestCreatePartStudioTool:
+    """Test create_part_studio tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_part_studio_success(self, mock_partstudio):
+        """Test successful Part Studio creation via tool."""
+        mock_partstudio.create_part_studio = AsyncMock(
+            return_value={"id": "new_ps_123", "name": "My Part Studio"}
+        )
+
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "name": "My Part Studio",
+        }
+
+        result = await call_tool("create_part_studio", arguments)
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+        assert "My Part Studio" in result[0].text
+        assert "new_ps_123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_part_studio_http_error(self, mock_partstudio):
+        """Test Part Studio creation with HTTP error."""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "Document not found"
+        mock_partstudio.create_part_studio = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Not Found", request=Mock(), response=mock_response
+            )
+        )
+
+        arguments = {
+            "documentId": "invalid_doc",
+            "workspaceId": "ws123",
+            "name": "Part Studio",
+        }
+
+        result = await call_tool("create_part_studio", arguments)
+
+        assert isinstance(result, list)
+        assert "Error" in result[0].text
+        assert "404" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_part_studio_generic_error(self, mock_partstudio):
+        """Test Part Studio creation with generic error."""
+        mock_partstudio.create_part_studio = AsyncMock(
+            side_effect=Exception("Unexpected error")
+        )
+
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "name": "Part Studio",
+        }
+
+        result = await call_tool("create_part_studio", arguments)
 
         assert isinstance(result, list)
         assert "Error" in result[0].text

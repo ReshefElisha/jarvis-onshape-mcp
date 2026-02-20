@@ -428,3 +428,74 @@ class TestDocumentManager:
             await document_manager.list_documents()
 
         assert "API Error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_create_document_success(self, document_manager, onshape_client):
+        """Test creating a new document with minimal parameters."""
+        create_response = {
+            "id": "new_doc_123",
+            "name": "New Document",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "modifiedAt": "2024-01-01T00:00:00Z",
+            "owner": {"id": "user1", "name": "Test User"},
+            "public": False,
+            "description": None,
+        }
+        onshape_client.post = AsyncMock(return_value=create_response)
+
+        doc = await document_manager.create_document(name="New Document")
+
+        assert isinstance(doc, DocumentInfo)
+        assert doc.id == "new_doc_123"
+        assert doc.name == "New Document"
+        assert doc.public is False
+
+        # Verify API call
+        onshape_client.post.assert_called_once()
+        call_args = onshape_client.post.call_args
+        assert "/api/v10/documents" in call_args[0][0]
+        # Verify isPublic is always sent even when False
+        assert call_args[1]["data"]["isPublic"] is False
+        assert "description" not in call_args[1]["data"]
+
+    @pytest.mark.asyncio
+    async def test_create_document_with_all_params(self, document_manager, onshape_client):
+        """Test creating a document with description and is_public."""
+        create_response = {
+            "id": "new_doc_456",
+            "name": "Public Document",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "modifiedAt": "2024-01-01T00:00:00Z",
+            "owner": {"id": "user1", "name": "Test User"},
+            "public": True,
+            "description": "A public document",
+        }
+        onshape_client.post = AsyncMock(return_value=create_response)
+
+        doc = await document_manager.create_document(
+            name="Public Document",
+            description="A public document",
+            is_public=True,
+        )
+
+        assert isinstance(doc, DocumentInfo)
+        assert doc.id == "new_doc_456"
+        assert doc.public is True
+        assert doc.description == "A public document"
+
+        # Verify all parameters were sent
+        call_args = onshape_client.post.call_args
+        data = call_args[1]["data"]
+        assert data["name"] == "Public Document"
+        assert data["description"] == "A public document"
+        assert data["isPublic"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_document_api_error(self, document_manager, onshape_client):
+        """Test that API errors in create_document propagate correctly."""
+        onshape_client.post = AsyncMock(side_effect=Exception("API Error"))
+
+        with pytest.raises(Exception) as exc_info:
+            await document_manager.create_document(name="Failed Document")
+
+        assert "API Error" in str(exc_info.value)

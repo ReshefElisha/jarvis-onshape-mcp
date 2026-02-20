@@ -275,6 +275,44 @@ class DocumentManager:
 
         return elements
 
+    async def create_document(
+        self, name: str, description: Optional[str] = None, is_public: bool = False
+    ) -> DocumentInfo:
+        """Create a new Onshape document.
+
+        Args:
+            name: Name for the new document
+            description: Optional description
+            is_public: Whether the document should be public
+
+        Returns:
+            DocumentInfo for the created document
+        """
+        data: Dict[str, Any] = {"name": name}
+        if description is not None:
+            data["description"] = description
+        data["isPublic"] = is_public
+
+        response = await self.client.post("/api/v10/documents", data=data)
+
+        # Handle thumbnail - can be dict with 'href' or None
+        thumbnail_data = response.get("thumbnail")
+        thumbnail_url = None
+        if thumbnail_data and isinstance(thumbnail_data, dict):
+            thumbnail_url = thumbnail_data.get("href")
+
+        return DocumentInfo(
+            id=response.get("id"),
+            name=response.get("name"),
+            createdAt=response.get("createdAt"),
+            modifiedAt=response.get("modifiedAt"),
+            ownerId=response.get("owner", {}).get("id", ""),
+            ownerName=response.get("owner", {}).get("name"),
+            public=response.get("public", False),
+            description=response.get("description"),
+            thumbnail=thumbnail_url,
+        )
+
     async def get_document_summary(self, document_id: str) -> Dict[str, Any]:
         """Get a comprehensive summary of a document including workspaces and elements.
 
