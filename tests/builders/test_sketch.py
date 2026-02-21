@@ -1,5 +1,7 @@
 """Unit tests for Sketch builder - Corrected for actual Onshape API structure."""
 
+import math
+
 import pytest
 from onshape_mcp.builders.sketch import SketchBuilder, SketchPlane
 
@@ -179,34 +181,168 @@ class TestSketchBuilder:
         assert len(feature["constraints"]) > 2
 
 
-# Tests for unimplemented features - mark as skipped
-class TestSketchBuilderFutureFeatures:
-    """Tests for features not yet implemented."""
+class TestSketchBuilderCircle:
+    """Test add_circle functionality."""
 
-    @pytest.mark.skip(reason="add_circle not yet implemented")
-    def test_add_circle_basic(self):
-        """Test adding a basic circle."""
+    def test_add_circle_returns_self(self):
         sketch = SketchBuilder()
         result = sketch.add_circle(center=(5, 5), radius=3)
         assert result is sketch
 
-    @pytest.mark.skip(reason="add_circle not yet implemented")
-    def test_add_circle_with_variable(self):
-        """Test adding circle with radius variable."""
+    def test_add_circle_creates_entity(self):
         sketch = SketchBuilder()
-        sketch.add_circle(center=(5, 5), radius=3, variable_radius="circle_radius")
-        assert len(sketch.constraints) >= 1
+        sketch.add_circle(center=(5, 5), radius=3)
+        assert len(sketch.entities) == 1
 
-    @pytest.mark.skip(reason="add_line not yet implemented")
-    def test_add_line_basic(self):
-        """Test adding a basic line."""
+        entity = sketch.entities[0]
+        assert entity["btType"] == "BTMSketchCurveSegment-155"
+        assert entity["geometry"]["btType"] == "BTCurveGeometryCircle-115"
+        assert entity["isConstruction"] is False
+        assert "centerId" in entity
+
+    def test_add_circle_converts_to_meters(self):
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(1.0, 2.0), radius=3.0)
+
+        geo = sketch.entities[0]["geometry"]
+        assert abs(geo["xcenter"] - 1.0 * 0.0254) < 1e-10
+        assert abs(geo["ycenter"] - 2.0 * 0.0254) < 1e-10
+        assert abs(geo["radius"] - 3.0 * 0.0254) < 1e-10
+
+    def test_add_circle_full_arc_params(self):
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1)
+
+        entity = sketch.entities[0]
+        assert entity["startParam"] == 0.0
+        assert abs(entity["endParam"] - 2.0 * math.pi) < 1e-10
+
+    def test_add_circle_construction(self):
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1, is_construction=True)
+        assert sketch.entities[0]["isConstruction"] is True
+
+
+class TestSketchBuilderArc:
+    """Test add_arc functionality."""
+
+    def test_add_arc_returns_self(self):
+        sketch = SketchBuilder()
+        result = sketch.add_arc(center=(0, 0), radius=5, start_angle=0, end_angle=90)
+        assert result is sketch
+
+    def test_add_arc_creates_entity(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(1, 2), radius=3, start_angle=0, end_angle=180)
+        assert len(sketch.entities) == 1
+
+        entity = sketch.entities[0]
+        assert entity["btType"] == "BTMSketchCurveSegment-155"
+        assert entity["geometry"]["btType"] == "BTCurveGeometryCircle-115"
+
+    def test_add_arc_converts_angles_to_radians(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(0, 0), radius=1, start_angle=45, end_angle=135)
+
+        entity = sketch.entities[0]
+        assert abs(entity["startParam"] - math.radians(45)) < 1e-10
+        assert abs(entity["endParam"] - math.radians(135)) < 1e-10
+
+    def test_add_arc_construction(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(0, 0), radius=1, is_construction=True)
+        assert sketch.entities[0]["isConstruction"] is True
+
+
+class TestSketchBuilderLine:
+    """Test add_line functionality."""
+
+    def test_add_line_returns_self(self):
         sketch = SketchBuilder()
         result = sketch.add_line(start=(0, 0), end=(10, 10))
         assert result is sketch
 
-    @pytest.mark.skip(reason="add_line not yet implemented")
+    def test_add_line_creates_entity(self):
+        sketch = SketchBuilder()
+        sketch.add_line(start=(0, 0), end=(10, 0))
+        assert len(sketch.entities) == 1
+
+        entity = sketch.entities[0]
+        assert entity["btType"] == "BTMSketchCurveSegment-155"
+        assert entity["geometry"]["btType"] == "BTCurveGeometryLine-117"
+        assert entity["isConstruction"] is False
+
+    def test_add_line_direction_horizontal(self):
+        sketch = SketchBuilder()
+        sketch.add_line(start=(0, 0), end=(10, 0))
+
+        geo = sketch.entities[0]["geometry"]
+        assert abs(geo["dirX"] - 1.0) < 1e-10
+        assert abs(geo["dirY"] - 0.0) < 1e-10
+
+    def test_add_line_direction_vertical(self):
+        sketch = SketchBuilder()
+        sketch.add_line(start=(0, 0), end=(0, 5))
+
+        geo = sketch.entities[0]["geometry"]
+        assert abs(geo["dirX"] - 0.0) < 1e-10
+        assert abs(geo["dirY"] - 1.0) < 1e-10
+
     def test_add_line_construction(self):
-        """Test adding a construction line."""
         sketch = SketchBuilder()
         sketch.add_line(start=(0, 0), end=(10, 10), is_construction=True)
-        assert len(sketch.entities) == 1
+        assert sketch.entities[0]["isConstruction"] is True
+
+    def test_add_line_zero_length_raises(self):
+        sketch = SketchBuilder()
+        with pytest.raises(ValueError, match="Line start and end points must be different"):
+            sketch.add_line(start=(5, 5), end=(5, 5))
+
+
+class TestSketchBuilderPolygon:
+    """Test add_polygon functionality."""
+
+    def test_add_polygon_returns_self(self):
+        sketch = SketchBuilder()
+        result = sketch.add_polygon(center=(0, 0), sides=6, radius=5)
+        assert result is sketch
+
+    def test_add_polygon_triangle(self):
+        sketch = SketchBuilder()
+        sketch.add_polygon(center=(0, 0), sides=3, radius=5)
+        assert len(sketch.entities) == 3
+
+    def test_add_polygon_hexagon(self):
+        sketch = SketchBuilder()
+        sketch.add_polygon(center=(0, 0), sides=6, radius=5)
+        assert len(sketch.entities) == 6
+
+    def test_add_polygon_all_lines(self):
+        sketch = SketchBuilder()
+        sketch.add_polygon(center=(0, 0), sides=4, radius=5)
+        for entity in sketch.entities:
+            assert entity["geometry"]["btType"] == "BTCurveGeometryLine-117"
+
+    def test_add_polygon_less_than_3_sides_raises(self):
+        sketch = SketchBuilder()
+        with pytest.raises(ValueError, match="Polygon must have at least 3 sides"):
+            sketch.add_polygon(center=(0, 0), sides=2, radius=5)
+
+    def test_add_polygon_construction(self):
+        sketch = SketchBuilder()
+        sketch.add_polygon(center=(0, 0), sides=4, radius=5, is_construction=True)
+        for entity in sketch.entities:
+            assert entity["isConstruction"] is True
+
+    def test_mixed_entities(self):
+        """Test combining different entity types in one sketch."""
+        sketch = SketchBuilder(plane_id="plane1")
+        sketch.add_rectangle((0, 0), (10, 5))
+        sketch.add_circle((5, 2.5), 1)
+        sketch.add_line((0, 0), (10, 5))
+
+        # 4 rect lines + 1 circle + 1 line
+        assert len(sketch.entities) == 6
+
+        result = sketch.build()
+        assert len(result["feature"]["entities"]) == 6
