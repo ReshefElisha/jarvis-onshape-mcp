@@ -6,13 +6,15 @@ Enhanced Model Context Protocol (MCP) server for programmatic CAD modeling with 
 
 This MCP server provides comprehensive programmatic access to Onshape's REST API, enabling:
 
-### ✨ Core Capabilities
+### ✨ Core Capabilities (35 tools)
 
 - **🔍 Document Discovery** - Search and list projects, find Part Studios, navigate workspaces
-- **📐 Parametric Sketch Creation** - Create sketches with rectangles, circles, and lines
-- **⚙️ Feature Management** - Add extrudes, manage feature trees
+- **📐 Parametric Sketches** - Rectangles, circles, lines, and arcs on standard planes
+- **⚙️ Feature Management** - Extrude, revolve, fillet, chamfer, boolean, and pattern features
+- **🏗️ Assembly Management** - Create assemblies, add instances, position parts, create mates
 - **📊 Variable Tables** - Read and write Onshape variable tables for parametric designs
-- **🔧 Configuration Support** - Work with Onshape configuration parameters
+- **🧮 FeatureScript** - Evaluate FeatureScript expressions, get bounding boxes
+- **📦 Export** - Export Part Studios and Assemblies to STL, STEP, PARASOLID, GLTF, OBJ
 - **🗂️ Part Studio Management** - Create and manage Part Studios programmatically
 
 ## Installation
@@ -107,128 +109,75 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 
 ## Available Tools
 
-### 🔍 Document Discovery Tools
+### 🔍 Document & Navigation Tools
 
-#### list_documents
-List documents in your Onshape account with filtering and sorting.
+| Tool | Description |
+|------|-------------|
+| `list_documents` | List documents with filtering (`filterType`, `sortBy`, `sortOrder`, `limit`) |
+| `search_documents` | Search documents by name or description |
+| `get_document` | Get detailed document information |
+| `get_document_summary` | Get comprehensive summary with workspaces and elements |
+| `find_part_studios` | Find Part Studios with optional name filtering |
+| `get_elements` | Get all elements (Part Studios, Assemblies, BOMs) in a workspace |
+| `get_parts` | Get all parts from a Part Studio |
+| `get_assembly` | Get assembly structure with instances and occurrences |
+| `create_document` | Create a new Onshape document |
+| `create_part_studio` | Create a new Part Studio in a document |
 
-**Parameters:**
-- `filterType` - "all", "owned", "created", "shared" (optional)
-- `sortBy` - "name", "modifiedAt", "createdAt" (optional)
-- `sortOrder` - "asc", "desc" (optional)
-- `limit` - Maximum number of results (optional)
+### 🏗️ Assembly Tools
 
-#### search_documents
-Search for documents by name or description.
+| Tool | Description |
+|------|-------------|
+| `create_assembly` | Create a new Assembly in a document |
+| `add_assembly_instance` | Add a part or sub-assembly instance to an assembly |
+| `transform_instance` | Position/rotate an instance using translation (inches) and rotation (degrees) |
+| `create_fastened_mate` | Create a rigid mate between two instances |
+| `create_revolute_mate` | Create a rotational mate between two instances |
 
-**Parameters:**
-- `query` - Search query string (required)
-- `limit` - Maximum number of results (optional)
+### 📐 Sketch Tools
 
-#### get_document
-Get detailed information about a specific document.
+| Tool | Description |
+|------|-------------|
+| `create_sketch_rectangle` | Rectangle with optional variable references for width/height |
+| `create_sketch_circle` | Circle with center point and radius |
+| `create_sketch_line` | Line from start point to end point |
+| `create_sketch_arc` | Arc with center, radius, start angle, and end angle |
 
-**Parameters:**
-- `documentId` - Onshape document ID (required)
+All sketch tools support `plane` (Front/Top/Right) and `name` parameters. Dimensions are in inches.
 
-#### get_document_summary
-Get comprehensive document summary including all workspaces and elements.
+### ⚙️ Feature Tools
 
-**Parameters:**
-- `documentId` - Onshape document ID (required)
+| Tool | Description |
+|------|-------------|
+| `create_extrude` | Extrude a sketch with depth, optional variable reference, and operation type (NEW/ADD/REMOVE/INTERSECT) |
+| `create_revolve` | Revolve a sketch around an axis (X/Y/Z) with angle and operation type |
+| `create_fillet` | Round edges by edge IDs with radius (supports variable references) |
+| `create_chamfer` | Bevel edges by edge IDs with distance (supports variable references) |
+| `create_linear_pattern` | Repeat features along an axis (X/Y/Z) with distance and count |
+| `create_circular_pattern` | Repeat features around an axis with count and angle spread |
+| `create_boolean` | Union, subtract, or intersect bodies by deterministic IDs |
 
-#### find_part_studios
-Find Part Studio elements in a workspace, with optional name filtering.
+### 📊 Variable Tools
 
-**Parameters:**
-- `documentId` - Onshape document ID (required)
-- `workspaceId` - Workspace ID (required)
-- `namePattern` - Optional name pattern to filter by (case-insensitive)
+| Tool | Description |
+|------|-------------|
+| `get_variables` | Get all variables from a Part Studio variable table |
+| `set_variable` | Set or update a variable (e.g., `"0.75 in"`) |
+| `get_features` | Get all features from a Part Studio |
 
-#### get_elements
-Get all elements (Part Studios, Assemblies, BOMs, etc.) in a workspace.
+### 🧮 FeatureScript Tools
 
-**Parameters:**
-- `documentId` - Onshape document ID (required)
-- `workspaceId` - Workspace ID (required)
-- `elementType` - Optional filter by element type (e.g., 'PARTSTUDIO', 'ASSEMBLY')
+| Tool | Description |
+|------|-------------|
+| `eval_featurescript` | Evaluate a FeatureScript lambda expression (read-only) |
+| `get_bounding_box` | Get the tight bounding box of all parts in a Part Studio |
 
-#### get_parts
-Get all parts from a Part Studio element.
+### 📦 Export Tools
 
-**Parameters:**
-- `documentId` - Onshape document ID (required)
-- `workspaceId` - Workspace ID (required)
-- `elementId` - Part Studio element ID (required)
-
-#### get_assembly
-Get assembly structure including instances and occurrences.
-
-**Parameters:**
-- `documentId` - Onshape document ID (required)
-- `workspaceId` - Workspace ID (required)
-- `elementId` - Assembly element ID (required)
-
-### 📐 Sketch and Feature Tools
-
-#### create_sketch_rectangle
-
-Create a rectangular sketch with optional variable references.
-
-**Parameters:**
-- `documentId` - Onshape document ID
-- `workspaceId` - Workspace ID
-- `elementId` - Part Studio element ID
-- `name` - Sketch name (default: "Sketch")
-- `plane` - Sketch plane: "Front", "Top", or "Right"
-- `corner1` - First corner [x, y] in inches
-- `corner2` - Second corner [x, y] in inches
-- `variableWidth` - Optional variable name for width
-- `variableHeight` - Optional variable name for height
-
-### create_extrude
-
-Create an extrude feature from a sketch.
-
-**Parameters:**
-- `documentId` - Onshape document ID
-- `workspaceId` - Workspace ID
-- `elementId` - Part Studio element ID
-- `name` - Extrude name (default: "Extrude")
-- `sketchFeatureId` - ID of sketch to extrude
-- `depth` - Extrude depth in inches
-- `variableDepth` - Optional variable name for depth
-- `operationType` - "NEW", "ADD", "REMOVE", or "INTERSECT"
-
-### get_variables
-
-Get all variables from a Part Studio variable table.
-
-**Parameters:**
-- `documentId` - Onshape document ID
-- `workspaceId` - Workspace ID
-- `elementId` - Part Studio element ID
-
-### set_variable
-
-Set or update a variable in a Part Studio.
-
-**Parameters:**
-- `documentId` - Onshape document ID
-- `workspaceId` - Workspace ID
-- `elementId` - Part Studio element ID
-- `name` - Variable name
-- `expression` - Variable expression (e.g., "0.75 in")
-- `description` - Optional variable description
-
-### get_features
-
-Get all features from a Part Studio.
-
-**Parameters:**
-- `documentId` - Onshape document ID
-- `workspaceId` - Workspace ID
-- `elementId` - Part Studio element ID
+| Tool | Description |
+|------|-------------|
+| `export_part_studio` | Export to STL, STEP, PARASOLID, GLTF, or OBJ (optional `partId` filter) |
+| `export_assembly` | Export to STL, STEP, or GLTF |
 
 ## Architecture
 
@@ -238,13 +187,23 @@ onshape_mcp/
 │   ├── client.py         # HTTP client with authentication
 │   ├── documents.py      # Document discovery & navigation
 │   ├── partstudio.py     # Part Studio management
-│   └── variables.py      # Variable table management
+│   ├── variables.py      # Variable table management
+│   ├── assemblies.py     # Assembly lifecycle & mates
+│   ├── export.py         # Part Studio & Assembly export
+│   └── featurescript.py  # FeatureScript evaluation
 ├── builders/
-│   ├── sketch.py         # Sketch feature builder
-│   └── extrude.py        # Extrude feature builder
+│   ├── sketch.py         # Sketch builder (rectangle, circle, line, arc, polygon)
+│   ├── extrude.py        # Extrude feature builder
+│   ├── revolve.py        # Revolve feature builder
+│   ├── fillet.py         # Fillet feature builder
+│   ├── chamfer.py        # Chamfer feature builder
+│   ├── boolean.py        # Boolean operations (union, subtract, intersect)
+│   ├── pattern.py        # Linear & circular pattern builders
+│   ├── mate.py           # Mate connector & mate builders
+│   └── thicken.py        # Thicken feature builder
 ├── tools/
 │   └── __init__.py       # MCP tool definitions
-└── server.py             # Main MCP server (13 tools)
+└── server.py             # Main MCP server (35 tools)
 ```
 
 ## Examples
@@ -303,7 +262,7 @@ await create_extrude(
 
 ### Running Tests
 
-The project has comprehensive test coverage with **93 unit tests**.
+The project has comprehensive test coverage with **353 unit tests**.
 
 ```bash
 # Run all tests
@@ -361,35 +320,38 @@ ruff check .
 ## Roadmap
 
 ### Current Status ✅
-- ✅ Document discovery and navigation (5 tools)
-- ✅ Basic sketch creation on standard planes (Front/Top/Right)
+
+- ✅ Document discovery and navigation (10 tools)
+- ✅ Sketch creation with rectangles, circles, lines, and arcs
+- ✅ Feature tools: extrude, revolve, fillet, chamfer, boolean, patterns
+- ✅ Assembly management with mates and transforms
 - ✅ Variable table management
-- ✅ Extrude features with parametric depth
-- ✅ Proper Onshape API format (BTMSketch-151)
-- ✅ 93 comprehensive unit tests
+- ✅ FeatureScript evaluation and bounding box queries
+- ✅ Export to STL, STEP, PARASOLID, GLTF, OBJ
+- ✅ 353 comprehensive unit tests (86%+ coverage)
 
 ### In Research 🔬
+
 - 🔬 **Geometry-referenced sketch planes** - Create sketches on faces from existing features (see [docs/SKETCH_PLANE_REFERENCE_GUIDE.md](docs/SKETCH_PLANE_REFERENCE_GUIDE.md))
 - 🔬 Query API investigation - How to programmatically reference geometry
 - 🔬 Entity ID mapping - Understanding Onshape's internal ID system
 
 ### Near-Term Priorities 📋
+
 - [ ] Implement `create_sketch_on_geometry()` for carpentry-correct cabinet assembly
-- [ ] Add support for more sketch entities (circles, arcs)
-- [ ] Implement more constraint types
-- [ ] Pattern features (linear, circular) for shelves and hardware holes
+- [ ] Sketch constraints (coincident, parallel, tangent, etc.)
+- [ ] Slider and cylindrical mate types
 - [ ] Pocket cuts and profiles for joinery (dados, rabbets)
 
 ### Long-Term Goals 🎯
-- [ ] Assembly support and mate connectors
-- [ ] Advanced feature types (fillet, chamfer, revolve)
+
 - [ ] Drawing creation
-- [ ] Part export (STEP, STL, etc.)
-- [ ] Advanced constraints and relations
-- [ ] FeatureScript execution
 - [ ] Bill of Materials (BOM) generation
+- [ ] Advanced constraints and relations
+- [ ] Configuration parameter support
 
 ### Woodworking-Specific Features 🪚
+
 - [ ] Joinery library (dado, rabbet, mortise & tenon, dovetail)
 - [ ] Standard hardware patterns (shelf pins, drawer slides)
 - [ ] Cut list generation

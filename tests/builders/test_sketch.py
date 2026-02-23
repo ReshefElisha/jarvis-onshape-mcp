@@ -205,8 +205,8 @@ class TestSketchBuilderCircle:
         sketch.add_circle(center=(1.0, 2.0), radius=3.0)
 
         geo = sketch.entities[0]["geometry"]
-        assert abs(geo["xcenter"] - 1.0 * 0.0254) < 1e-10
-        assert abs(geo["ycenter"] - 2.0 * 0.0254) < 1e-10
+        assert abs(geo["xCenter"] - 1.0 * 0.0254) < 1e-10
+        assert abs(geo["yCenter"] - 2.0 * 0.0254) < 1e-10
         assert abs(geo["radius"] - 3.0 * 0.0254) < 1e-10
 
     def test_add_circle_full_arc_params(self):

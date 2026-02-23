@@ -131,12 +131,13 @@ class TestVariableManager:
 
         assert result == {"success": True}
 
-        # Verify data payload
+        # Verify data payload (sent as a list for the variables API)
         call_args = onshape_client.post.call_args
         data = call_args[1]["data"]
-        assert data["name"] == "thickness"
-        assert data["expression"] == "0.25 in"
-        assert data["description"] == "Material thickness"
+        assert isinstance(data, list)
+        assert data[0]["name"] == "thickness"
+        assert data[0]["expression"] == "0.25 in"
+        assert data[0]["description"] == "Material thickness"
 
     @pytest.mark.asyncio
     async def test_set_variable_without_description(
@@ -153,12 +154,13 @@ class TestVariableManager:
             "1.5 in",
         )
 
-        # Verify description is not in payload
+        # Verify description is not in payload (sent as a list for the variables API)
         call_args = onshape_client.post.call_args
         data = call_args[1]["data"]
-        assert data["name"] == "depth"
-        assert data["expression"] == "1.5 in"
-        assert "description" not in data
+        assert isinstance(data, list)
+        assert data[0]["name"] == "depth"
+        assert data[0]["expression"] == "1.5 in"
+        assert "description" not in data[0]
 
     @pytest.mark.asyncio
     async def test_set_variable_updates_existing(

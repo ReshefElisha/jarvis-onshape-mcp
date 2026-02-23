@@ -46,9 +46,9 @@ logger.add(
 app = Server("onshape-mcp")
 
 # Initialize Onshape client
-credentials = OnshapeCredentials(
-    access_key=os.getenv("ONSHAPE_ACCESS_KEY", ""), secret_key=os.getenv("ONSHAPE_SECRET_KEY", "")
-)
+_ak = os.getenv("ONSHAPE_ACCESS_KEY", "")
+_sk = os.getenv("ONSHAPE_SECRET_KEY", "")
+credentials = OnshapeCredentials(access_key=_ak, secret_key=_sk)
 client = OnshapeClient(credentials)
 partstudio_manager = PartStudioManager(client)
 variable_manager = VariableManager(client)
