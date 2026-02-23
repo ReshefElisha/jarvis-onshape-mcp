@@ -221,6 +221,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="delete_feature",
+            description="Delete a feature from a Part Studio",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "Feature ID to delete"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId"],
+            },
+        ),
+        Tool(
             name="list_documents",
             description="List documents in your Onshape account with optional filtering and sorting",
             inputSchema={
@@ -1076,6 +1090,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=f"Error getting features: {str(e)}",
                 )
             ]
+
+    elif name == "delete_feature":
+        try:
+            result = await partstudio_manager.delete_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
+            )
+            return [TextContent(type="text", text=f"Deleted feature {arguments['featureId']}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error deleting feature: API returned {e.response.status_code}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error deleting feature: {str(e)}")]
 
     elif name == "list_documents":
         try:

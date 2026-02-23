@@ -385,13 +385,43 @@ class SketchBuilder:
 
         circle_id = self._generate_entity_id("circle")
 
+        # Full circles require two semicircular arcs to form a closed region.
+        # A single BTMSketchCurveSegment with startParam=0 and endParam=2π
+        # is accepted by Onshape but doesn't render or create a sketch region.
+        arc1_id = f"{circle_id}.arc1"
+        arc2_id = f"{circle_id}.arc2"
+
+        # First semicircle: 0 to π
         self.entities.append(
             {
                 "btType": "BTMSketchCurveSegment-155",
-                "entityId": circle_id,
+                "entityId": arc1_id,
                 "startPointId": f"{circle_id}.start",
-                "endPointId": f"{circle_id}.end",
+                "endPointId": f"{circle_id}.mid",
                 "startParam": 0.0,
+                "endParam": math.pi,
+                "geometry": {
+                    "btType": "BTCurveGeometryCircle-115",
+                    "radius": radius_m,
+                    "xCenter": cx_m,
+                    "yCenter": cy_m,
+                    "xDir": 1.0,
+                    "yDir": 0.0,
+                    "clockwise": False,
+                },
+                "centerId": f"{circle_id}.center",
+                "isConstruction": is_construction,
+            }
+        )
+
+        # Second semicircle: π to 2π
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": arc2_id,
+                "startPointId": f"{circle_id}.mid",
+                "endPointId": f"{circle_id}.start",
+                "startParam": math.pi,
                 "endParam": 2.0 * math.pi,
                 "geometry": {
                     "btType": "BTCurveGeometryCircle-115",
@@ -404,6 +434,46 @@ class SketchBuilder:
                 },
                 "centerId": f"{circle_id}.center",
                 "isConstruction": is_construction,
+            }
+        )
+
+        # Coincident constraints to close the circle
+        self.constraints.append(
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "COINCIDENT",
+                "entityId": f"{circle_id}.close1",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc1_id}.end",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc2_id}.start",
+                        "parameterId": "localSecond",
+                    },
+                ],
+            }
+        )
+        self.constraints.append(
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "COINCIDENT",
+                "entityId": f"{circle_id}.close2",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc2_id}.end",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc1_id}.start",
+                        "parameterId": "localSecond",
+                    },
+                ],
             }
         )
 

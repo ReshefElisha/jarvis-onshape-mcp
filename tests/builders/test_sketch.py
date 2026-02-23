@@ -189,16 +189,25 @@ class TestSketchBuilderCircle:
         result = sketch.add_circle(center=(5, 5), radius=3)
         assert result is sketch
 
-    def test_add_circle_creates_entity(self):
+    def test_add_circle_creates_two_arcs(self):
         sketch = SketchBuilder()
         sketch.add_circle(center=(5, 5), radius=3)
-        assert len(sketch.entities) == 1
+        assert len(sketch.entities) == 2
 
-        entity = sketch.entities[0]
-        assert entity["btType"] == "BTMSketchCurveSegment-155"
-        assert entity["geometry"]["btType"] == "BTCurveGeometryCircle-115"
-        assert entity["isConstruction"] is False
-        assert "centerId" in entity
+        for entity in sketch.entities:
+            assert entity["btType"] == "BTMSketchCurveSegment-155"
+            assert entity["geometry"]["btType"] == "BTCurveGeometryCircle-115"
+            assert entity["isConstruction"] is False
+
+    def test_add_circle_arcs_form_full_circle(self):
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1)
+
+        arc1, arc2 = sketch.entities
+        assert arc1["startParam"] == 0.0
+        assert abs(arc1["endParam"] - math.pi) < 1e-10
+        assert abs(arc2["startParam"] - math.pi) < 1e-10
+        assert abs(arc2["endParam"] - 2.0 * math.pi) < 1e-10
 
     def test_add_circle_converts_to_meters(self):
         sketch = SketchBuilder()
@@ -209,18 +218,18 @@ class TestSketchBuilderCircle:
         assert abs(geo["yCenter"] - 2.0 * 0.0254) < 1e-10
         assert abs(geo["radius"] - 3.0 * 0.0254) < 1e-10
 
-    def test_add_circle_full_arc_params(self):
+    def test_add_circle_adds_coincident_constraints(self):
         sketch = SketchBuilder()
         sketch.add_circle(center=(0, 0), radius=1)
-
-        entity = sketch.entities[0]
-        assert entity["startParam"] == 0.0
-        assert abs(entity["endParam"] - 2.0 * math.pi) < 1e-10
+        assert len(sketch.constraints) == 2
+        assert sketch.constraints[0]["constraintType"] == "COINCIDENT"
+        assert sketch.constraints[1]["constraintType"] == "COINCIDENT"
 
     def test_add_circle_construction(self):
         sketch = SketchBuilder()
         sketch.add_circle(center=(0, 0), radius=1, is_construction=True)
         assert sketch.entities[0]["isConstruction"] is True
+        assert sketch.entities[1]["isConstruction"] is True
 
 
 class TestSketchBuilderArc:
@@ -341,8 +350,8 @@ class TestSketchBuilderPolygon:
         sketch.add_circle((5, 2.5), 1)
         sketch.add_line((0, 0), (10, 5))
 
-        # 4 rect lines + 1 circle + 1 line
-        assert len(sketch.entities) == 6
+        # 4 rect lines + 2 circle arcs + 1 line
+        assert len(sketch.entities) == 7
 
         result = sketch.build()
-        assert len(result["feature"]["entities"]) == 6
+        assert len(result["feature"]["entities"]) == 7
