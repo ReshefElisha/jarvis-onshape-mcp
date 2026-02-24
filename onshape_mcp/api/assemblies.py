@@ -133,7 +133,11 @@ class AssemblyManager:
             f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}"
             f"/occurrencetransforms"
         )
-        data = {"isRelative": True, "occurrences": occurrences}
+        data = {
+            "isRelative": True,
+            "occurrences": [{"path": occ["path"]} for occ in occurrences],
+            "transform": occurrences[0]["transform"],
+        }
         return await self.client.post(path, data=data)
 
     async def add_feature(

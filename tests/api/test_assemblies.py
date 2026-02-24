@@ -178,14 +178,11 @@ class TestAssemblyManager:
         self, assembly_manager, onshape_client, sample_document_ids
     ):
         """Test applying transforms to assembly occurrences."""
+        transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.1, 0, 0, 1]
         occurrences = [
             {
                 "path": ["inst1"],
-                "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.1, 0, 0, 1],
-            },
-            {
-                "path": ["inst2"],
-                "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.2, 0, 1],
+                "transform": transform,
             },
         ]
         expected_response = {"status": "ok"}
@@ -205,7 +202,8 @@ class TestAssemblyManager:
         call_args = onshape_client.post.call_args
         body = call_args[1]["data"]
         assert body["isRelative"] is True
-        assert body["occurrences"] == occurrences
+        assert body["occurrences"] == [{"path": ["inst1"]}]
+        assert body["transform"] == transform
 
     @pytest.mark.asyncio
     async def test_add_feature_success(
