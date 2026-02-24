@@ -32,6 +32,8 @@ from .builders.chamfer import ChamferBuilder, ChamferType
 from .builders.revolve import RevolveBuilder, RevolveType
 from .builders.pattern import LinearPatternBuilder, CircularPatternBuilder
 from .builders.boolean import BooleanBuilder, BooleanType
+from .analysis.interference import check_assembly_interference, format_interference_result
+from .analysis.positioning import get_assembly_positions, set_absolute_position, align_to_face
 
 # Configure loguru to output to stderr
 logger.remove()  # Remove default handler
@@ -798,6 +800,69 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="check_assembly_interference",
+            description="Check for overlapping/interfering parts in an assembly using bounding box detection. Returns which parts overlap and by how much.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="get_assembly_positions",
+            description="Get positions, sizes, and world-space bounds of all instances in an assembly (in inches)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="set_instance_position",
+            description="Set an instance to an ABSOLUTE position in inches (unlike transform_instance which is relative). Resets rotation to identity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID to position"},
+                    "x": {"type": "number", "description": "Absolute X position in inches"},
+                    "y": {"type": "number", "description": "Absolute Y position in inches"},
+                    "z": {"type": "number", "description": "Absolute Z position in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId", "x", "y", "z"],
+            },
+        ),
+        Tool(
+            name="align_instance_to_face",
+            description="Position source instance flush against a face of target instance. Faces: front (min Y), back (max Y), left (min X), right (max X), bottom (min Z), top (max Z). Only moves the perpendicular axis; other axes stay unchanged.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "sourceInstanceId": {"type": "string", "description": "Instance ID to move"},
+                    "targetInstanceId": {"type": "string", "description": "Instance ID to align against"},
+                    "face": {
+                        "type": "string",
+                        "enum": ["front", "back", "left", "right", "top", "bottom"],
+                        "description": "Face of target to align source against",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sourceInstanceId", "targetInstanceId", "face"],
             },
         ),
     ]
@@ -1886,6 +1951,74 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=f"Error exporting: API returned {e.response.status_code}.")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error exporting: {str(e)}")]
+
+    elif name == "check_assembly_interference":
+        try:
+            result = await check_assembly_interference(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+            return [TextContent(type="text", text=format_interference_result(result))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error checking interference: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error checking interference: {str(e)}")]
+
+    elif name == "get_assembly_positions":
+        try:
+            report = await get_assembly_positions(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+            return [TextContent(type="text", text=report)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting positions: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting positions: {str(e)}")]
+
+    elif name == "set_instance_position":
+        try:
+            msg = await set_absolute_position(
+                assembly_manager=assembly_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                instance_id=arguments["instanceId"],
+                x_inches=arguments["x"],
+                y_inches=arguments["y"],
+                z_inches=arguments["z"],
+            )
+            return [TextContent(type="text", text=msg)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error setting position: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error setting position: {str(e)}")]
+
+    elif name == "align_instance_to_face":
+        try:
+            msg = await align_to_face(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                source_instance_id=arguments["sourceInstanceId"],
+                target_instance_id=arguments["targetInstanceId"],
+                face=arguments["face"],
+            )
+            return [TextContent(type="text", text=msg)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error aligning instance: API returned {e.response.status_code}.")]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error aligning instance: {str(e)}")]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

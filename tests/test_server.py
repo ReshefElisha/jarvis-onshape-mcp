@@ -1501,6 +1501,111 @@ class TestExportTools:
         assert "Error" in result[0].text
 
 
+class TestListToolsPositioning:
+    """Test that positioning tools are registered."""
+
+    @pytest.mark.asyncio
+    async def test_includes_get_assembly_positions(self):
+        tools = await list_tools()
+        tool_names = [tool.name for tool in tools]
+        assert "get_assembly_positions" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_includes_set_instance_position(self):
+        tools = await list_tools()
+        tool_names = [tool.name for tool in tools]
+        assert "set_instance_position" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_includes_align_instance_to_face(self):
+        tools = await list_tools()
+        tool_names = [tool.name for tool in tools]
+        assert "align_instance_to_face" in tool_names
+
+
+class TestGetAssemblyPositionsTool:
+    """Test get_assembly_positions tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.get_assembly_positions")
+    async def test_success(self, mock_fn):
+        mock_fn.return_value = "Assembly Instance Positions\nFound 2 instance(s)"
+        result = await call_tool("get_assembly_positions", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert isinstance(result, list)
+        assert isinstance(result[0], TextContent)
+        assert "Positions" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.get_assembly_positions")
+    async def test_error(self, mock_fn):
+        mock_fn.side_effect = Exception("API failure")
+        result = await call_tool("get_assembly_positions", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "Error" in result[0].text
+
+
+class TestSetInstancePositionTool:
+    """Test set_instance_position tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.set_absolute_position")
+    async def test_success(self, mock_fn):
+        mock_fn.return_value = 'Set instance inst1 to absolute position: X=10.000", Y=-5.000", Z=0.000"'
+        result = await call_tool("set_instance_position", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "instanceId": "inst1", "x": 10.0, "y": -5.0, "z": 0.0,
+        })
+        assert isinstance(result[0], TextContent)
+        assert "10.000" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.set_absolute_position")
+    async def test_error(self, mock_fn):
+        mock_fn.side_effect = Exception("fail")
+        result = await call_tool("set_instance_position", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "instanceId": "i", "x": 0, "y": 0, "z": 0,
+        })
+        assert "Error" in result[0].text
+
+
+class TestAlignInstanceToFaceTool:
+    """Test align_instance_to_face tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.align_to_face")
+    async def test_success(self, mock_fn):
+        mock_fn.return_value = "Aligned 'Door' to 'front' face of 'Cabinet'."
+        result = await call_tool("align_instance_to_face", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "sourceInstanceId": "s1", "targetInstanceId": "t1", "face": "front",
+        })
+        assert "Aligned" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.align_to_face")
+    async def test_invalid_face(self, mock_fn):
+        mock_fn.side_effect = ValueError("Invalid face 'middle'")
+        result = await call_tool("align_instance_to_face", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "sourceInstanceId": "s1", "targetInstanceId": "t1", "face": "middle",
+        })
+        assert "Invalid" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.align_to_face")
+    async def test_error(self, mock_fn):
+        mock_fn.side_effect = Exception("API fail")
+        result = await call_tool("align_instance_to_face", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "sourceInstanceId": "s1", "targetInstanceId": "t1", "face": "front",
+        })
+        assert "Error" in result[0].text
+
+
 class TestUnknownTool:
     """Test handling of unknown tools."""
 

@@ -116,6 +116,7 @@ class AssemblyManager:
         workspace_id: str,
         element_id: str,
         occurrences: List[Dict[str, Any]],
+        is_relative: bool = True,
     ) -> Dict[str, Any]:
         """Apply transforms to assembly occurrences.
 
@@ -125,6 +126,8 @@ class AssemblyManager:
             element_id: Assembly element ID
             occurrences: List of occurrence transforms, each with "path"
                 (list of instance IDs) and "transform" (16-element 4x4 matrix)
+            is_relative: If True (default), transform is applied relative to
+                current position. If False, transform sets absolute position.
 
         Returns:
             API response
@@ -134,7 +137,7 @@ class AssemblyManager:
             f"/occurrencetransforms"
         )
         data = {
-            "isRelative": True,
+            "isRelative": is_relative,
             "occurrences": [{"path": occ["path"]} for occ in occurrences],
             "transform": occurrences[0]["transform"],
         }

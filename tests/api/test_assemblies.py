@@ -206,6 +206,50 @@ class TestAssemblyManager:
         assert body["transform"] == transform
 
     @pytest.mark.asyncio
+    async def test_transform_occurrences_absolute(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Test transform_occurrences with is_relative=False sends absolute transform."""
+        transform = [1, 0, 0, 0.254, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        occurrences = [{"path": ["inst1"], "transform": transform}]
+
+        onshape_client.post = AsyncMock(return_value={"status": "ok"})
+
+        await assembly_manager.transform_occurrences(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            occurrences,
+            is_relative=False,
+        )
+
+        call_args = onshape_client.post.call_args
+        body = call_args[1]["data"]
+        assert body["isRelative"] is False
+        assert body["transform"] == transform
+
+    @pytest.mark.asyncio
+    async def test_transform_occurrences_default_is_relative(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Test that default is_relative is True for backward compatibility."""
+        transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        occurrences = [{"path": ["inst1"], "transform": transform}]
+
+        onshape_client.post = AsyncMock(return_value={"status": "ok"})
+
+        await assembly_manager.transform_occurrences(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            occurrences,
+        )
+
+        call_args = onshape_client.post.call_args
+        body = call_args[1]["data"]
+        assert body["isRelative"] is True
+
+    @pytest.mark.asyncio
     async def test_add_feature_success(
         self, assembly_manager, onshape_client, sample_document_ids
     ):
