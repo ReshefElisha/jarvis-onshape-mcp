@@ -26,7 +26,7 @@ from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
-from .builders.mate import MateBuilder, MateType, build_transform_matrix
+from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
 from .builders.chamfer import ChamferBuilder, ChamferType
 from .builders.revolve import RevolveBuilder, RevolveType
@@ -485,8 +485,70 @@ async def list_tools() -> list[Tool]:
                     "name": {"type": "string", "description": "Mate name", "default": "Revolute mate"},
                     "firstInstanceId": {"type": "string", "description": "First instance ID"},
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "minLimit": {"type": "number", "description": "Optional minimum rotation limit in degrees"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum rotation limit in degrees"},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+            },
+        ),
+        Tool(
+            name="create_slider_mate",
+            description="Create a slider (linear motion) mate between two assembly instances. The slide direction follows the mate connector's Z-axis.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Slider mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "minLimit": {"type": "number", "description": "Optional minimum travel limit in inches"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum travel limit in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+            },
+        ),
+        Tool(
+            name="create_cylindrical_mate",
+            description="Create a cylindrical (slide + rotate) mate between two assembly instances",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Cylindrical mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "minLimit": {"type": "number", "description": "Optional minimum axial travel limit in inches"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum axial travel limit in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+            },
+        ),
+        Tool(
+            name="create_mate_connector",
+            description="Create an explicit mate connector on an assembly instance with optional axis orientation. Use this to control the slide direction for slider mates.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID to attach the connector to"},
+                    "name": {"type": "string", "description": "Mate connector name", "default": "Mate connector"},
+                    "originX": {"type": "number", "description": "X origin offset in inches", "default": 0},
+                    "originY": {"type": "number", "description": "Y origin offset in inches", "default": 0},
+                    "originZ": {"type": "number", "description": "Z origin offset in inches", "default": 0},
+                    "axis": {
+                        "type": "string",
+                        "enum": ["X", "Y", "Z"],
+                        "description": "Primary axis direction. The connector's Z-axis aligns with this world axis. Controls slide direction for slider mates.",
+                        "default": "Z",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId"],
             },
         ),
         # === Sketch Tools ===
@@ -1691,6 +1753,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             mate = MateBuilder(name=arguments.get("name", "Revolute mate"), mate_type=MateType.REVOLUTE)
             mate.set_first_occurrence([arguments["firstInstanceId"]])
             mate.set_second_occurrence([arguments["secondInstanceId"]])
+            if "minLimit" in arguments and "maxLimit" in arguments:
+                mate.set_limits(arguments["minLimit"], arguments["maxLimit"])
             result = await assembly_manager.add_feature(
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
@@ -1705,6 +1769,77 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         except Exception as e:
             logger.exception("Unexpected error creating mate")
             return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_slider_mate":
+        try:
+            mate = MateBuilder(name=arguments.get("name", "Slider mate"), mate_type=MateType.SLIDER)
+            mate.set_first_occurrence([arguments["firstInstanceId"]])
+            mate.set_second_occurrence([arguments["secondInstanceId"]])
+            if "minLimit" in arguments and "maxLimit" in arguments:
+                mate.set_limits(arguments["minLimit"], arguments["maxLimit"])
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mate.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created slider mate '{arguments.get('name', 'Slider mate')}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_cylindrical_mate":
+        try:
+            mate = MateBuilder(name=arguments.get("name", "Cylindrical mate"), mate_type=MateType.CYLINDRICAL)
+            mate.set_first_occurrence([arguments["firstInstanceId"]])
+            mate.set_second_occurrence([arguments["secondInstanceId"]])
+            if "minLimit" in arguments and "maxLimit" in arguments:
+                mate.set_limits(arguments["minLimit"], arguments["maxLimit"])
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mate.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created cylindrical mate '{arguments.get('name', 'Cylindrical mate')}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_mate_connector":
+        try:
+            mc = MateConnectorBuilder(
+                name=arguments.get("name", "Mate connector"),
+                origin_x=arguments.get("originX", 0),
+                origin_y=arguments.get("originY", 0),
+                origin_z=arguments.get("originZ", 0),
+                axis=arguments.get("axis", "Z"),
+            )
+            mc.set_occurrence([arguments["instanceId"]])
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mc.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created mate connector '{arguments.get('name', 'Mate connector')}' on instance {arguments['instanceId']}. Feature ID: {feature_id}")]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate connector: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate connector: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate connector")
+            return [TextContent(type="text", text=f"Error creating mate connector: {str(e)}")]
 
     elif name == "create_sketch_circle":
         try:

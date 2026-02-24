@@ -17,12 +17,21 @@ class MateType(Enum):
 class MateConnectorBuilder:
     """Builder for creating Onshape mate connector features (BTMMateConnector-66)."""
 
+    # Rotation angles (degrees) that align the connector's Z-axis with a world axis.
+    # Assumes Onshape's ZYZ Euler convention for mate connector rotation parameters.
+    AXIS_ROTATIONS = {
+        "Z": (0.0, 0.0, 0.0),
+        "Y": (-90.0, 90.0, 0.0),
+        "X": (180.0, 90.0, 0.0),
+    }
+
     def __init__(
         self,
         name: str = "Mate connector",
         origin_x: float = 0.0,
         origin_y: float = 0.0,
         origin_z: float = 0.0,
+        axis: str = "Z",
     ):
         """Initialize mate connector builder.
 
@@ -31,12 +40,20 @@ class MateConnectorBuilder:
             origin_x: X origin in inches
             origin_y: Y origin in inches
             origin_z: Z origin in inches
+            axis: Primary axis direction ("X", "Y", or "Z"). The connector's
+                  Z-axis will be aligned with this world axis. Controls the
+                  slide direction for slider mates. Default is "Z".
         """
         self.name = name
         self.origin_x = origin_x
         self.origin_y = origin_y
         self.origin_z = origin_z
         self.occurrence_path: Optional[List[str]] = None
+        self._rotation0 = 0.0
+        self._rotation1 = 0.0
+        self._rotation2 = 0.0
+        if axis.upper() != "Z":
+            self.set_axis(axis)
 
     def set_origin(self, x: float, y: float, z: float) -> "MateConnectorBuilder":
         """Set the connector origin in inches.
@@ -64,6 +81,45 @@ class MateConnectorBuilder:
             Self for chaining
         """
         self.occurrence_path = path
+        return self
+
+    def set_axis(self, axis: str) -> "MateConnectorBuilder":
+        """Set the connector's primary axis direction.
+
+        The mate connector's Z-axis will be aligned with the specified world axis.
+        For slider mates, this controls the slide direction.
+
+        Args:
+            axis: "X", "Y", or "Z"
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If axis is not X, Y, or Z
+        """
+        axis = axis.upper()
+        if axis not in self.AXIS_ROTATIONS:
+            raise ValueError(f"axis must be 'X', 'Y', or 'Z', got '{axis}'")
+        self._rotation0, self._rotation1, self._rotation2 = self.AXIS_ROTATIONS[axis]
+        return self
+
+    def set_rotation(
+        self, rotation0: float = 0.0, rotation1: float = 0.0, rotation2: float = 0.0
+    ) -> "MateConnectorBuilder":
+        """Set explicit rotation angles for the connector orientation.
+
+        Args:
+            rotation0: First rotation angle in degrees
+            rotation1: Second rotation angle in degrees
+            rotation2: Third rotation angle in degrees
+
+        Returns:
+            Self for chaining
+        """
+        self._rotation0 = rotation0
+        self._rotation1 = rotation1
+        self._rotation2 = rotation2
         return self
 
     def build(self) -> Dict[str, Any]:
@@ -123,6 +179,24 @@ class MateConnectorBuilder:
                         "expression": f"{origin_z_meters} m",
                         "isInteger": False,
                     },
+                    {
+                        "btType": "BTMParameterQuantity-147",
+                        "parameterId": "rotation0",
+                        "expression": f"{math.radians(self._rotation0)} rad",
+                        "isInteger": False,
+                    },
+                    {
+                        "btType": "BTMParameterQuantity-147",
+                        "parameterId": "rotation1",
+                        "expression": f"{math.radians(self._rotation1)} rad",
+                        "isInteger": False,
+                    },
+                    {
+                        "btType": "BTMParameterQuantity-147",
+                        "parameterId": "rotation2",
+                        "expression": f"{math.radians(self._rotation2)} rad",
+                        "isInteger": False,
+                    },
                 ],
             }
         }
@@ -146,6 +220,8 @@ class MateBuilder:
         self.mate_type = mate_type
         self.first_path: List[str] = []
         self.second_path: List[str] = []
+        self.min_limit: Optional[float] = None
+        self.max_limit: Optional[float] = None
 
     def set_first_occurrence(self, path: List[str]) -> "MateBuilder":
         """Set the first occurrence path.
@@ -171,13 +247,30 @@ class MateBuilder:
         self.second_path = path
         return self
 
+    def set_limits(self, min_value: float, max_value: float) -> "MateBuilder":
+        """Set motion limits for the mate.
+
+        For SLIDER/CYLINDRICAL mates: values are in inches (converted to meters).
+        For REVOLUTE mates: values are in degrees (converted to radians).
+
+        Args:
+            min_value: Minimum travel (inches for slider, degrees for revolute)
+            max_value: Maximum travel (inches for slider, degrees for revolute)
+
+        Returns:
+            Self for chaining
+        """
+        self.min_limit = min_value
+        self.max_limit = max_value
+        return self
+
     def build(self) -> Dict[str, Any]:
         """Build the mate feature JSON.
 
         Returns:
             Feature definition for Onshape API
         """
-        return {
+        feature_data = {
             "feature": {
                 "btType": "BTMFeature-134",
                 "featureType": "mate",
@@ -213,6 +306,46 @@ class MateBuilder:
                 ],
             }
         }
+
+        if self.min_limit is not None and self.max_limit is not None:
+            params = feature_data["feature"]["parameters"]
+            params.append({
+                "btType": "BTMParameterBoolean-144",
+                "parameterId": "limitsEnabled",
+                "value": True,
+            })
+            if self.mate_type in (MateType.SLIDER, MateType.CYLINDRICAL):
+                min_m = self.min_limit * 0.0254
+                max_m = self.max_limit * 0.0254
+                params.append({
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "limitAxialZMin",
+                    "expression": f"{min_m} m",
+                    "isInteger": False,
+                })
+                params.append({
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "limitAxialZMax",
+                    "expression": f"{max_m} m",
+                    "isInteger": False,
+                })
+            elif self.mate_type == MateType.REVOLUTE:
+                min_rad = math.radians(self.min_limit)
+                max_rad = math.radians(self.max_limit)
+                params.append({
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "limitRotationMin",
+                    "expression": f"{min_rad} rad",
+                    "isInteger": False,
+                })
+                params.append({
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "limitRotationMax",
+                    "expression": f"{max_rad} rad",
+                    "isInteger": False,
+                })
+
+        return feature_data
 
 
 def build_transform_matrix(

@@ -92,6 +92,9 @@ class TestListTools:
         assert "transform_instance" in tool_names
         assert "create_fastened_mate" in tool_names
         assert "create_revolute_mate" in tool_names
+        assert "create_slider_mate" in tool_names
+        assert "create_cylindrical_mate" in tool_names
+        assert "create_mate_connector" in tool_names
 
     @pytest.mark.asyncio
     async def test_list_tools_includes_feature_tools(self):
@@ -1141,6 +1144,136 @@ class TestAssemblyTools:
 
         assert "Revolute mate" in result[0].text
         assert "rmate123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_slider_mate_success(self, mock_asm):
+        """Test creating a slider mate."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "slide123"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "firstInstanceId": "inst1",
+            "secondInstanceId": "inst2",
+            "name": "Drawer Slide",
+        }
+        result = await call_tool("create_slider_mate", arguments)
+        assert "Drawer Slide" in result[0].text
+        assert "slide123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_slider_mate_error(self, mock_asm):
+        """Test slider mate error."""
+        mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("create_slider_mate", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "a", "secondInstanceId": "b",
+        })
+        assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_slider_mate_with_limits(self, mock_asm):
+        """Test slider mate with travel limits."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "slide456"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "firstInstanceId": "inst1",
+            "secondInstanceId": "inst2",
+            "minLimit": -14.0,
+            "maxLimit": 0.0,
+        }
+        result = await call_tool("create_slider_mate", arguments)
+        assert "slide456" in result[0].text
+        # Verify limits were passed in the feature data
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+        assert "limitsEnabled" in param_ids
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_cylindrical_mate_success(self, mock_asm):
+        """Test creating a cylindrical mate."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "cyl123"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "firstInstanceId": "inst1",
+            "secondInstanceId": "inst2",
+        }
+        result = await call_tool("create_cylindrical_mate", arguments)
+        assert "Cylindrical mate" in result[0].text
+        assert "cyl123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_cylindrical_mate_error(self, mock_asm):
+        """Test cylindrical mate error."""
+        mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("create_cylindrical_mate", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "a", "secondInstanceId": "b",
+        })
+        assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_success(self, mock_asm):
+        """Test creating a mate connector."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "mc123"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "instanceId": "inst1",
+            "name": "Slide Connector",
+            "axis": "Y",
+        }
+        result = await call_tool("create_mate_connector", arguments)
+        assert "Slide Connector" in result[0].text
+        assert "mc123" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_default_axis(self, mock_asm):
+        """Test mate connector with default axis."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "mc456"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "instanceId": "inst1",
+        }
+        result = await call_tool("create_mate_connector", arguments)
+        assert "mc456" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_error(self, mock_asm):
+        """Test mate connector error."""
+        mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("create_mate_connector", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "instanceId": "i",
+        })
+        assert "Error" in result[0].text
 
 
 class TestFeatureTools:
