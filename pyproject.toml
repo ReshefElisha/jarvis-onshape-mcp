@@ -1,6 +1,6 @@
 [project]
 name = "onshape-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Enhanced MCP server for programmatic CAD modeling with Onshape"
 authors = [
     {name = "hedless", email = "your-email@example.com"}
