@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 from onshape_mcp.analysis.interference import BoundingBox
 from onshape_mcp.analysis.positioning import (
-    INCHES_TO_METERS,
     InstancePositionInfo,
     align_to_face,
     build_absolute_translation_matrix,
