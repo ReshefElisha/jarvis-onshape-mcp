@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Assembly management tools: `create_assembly`, `add_assembly_instance`, `transform_instance`, `create_fastened_mate`, `create_revolute_mate`
+- Expanded sketch geometry tools: `create_sketch_circle`, `create_sketch_line`, `create_sketch_arc`
+- Part Studio feature tools: `create_fillet`, `create_chamfer`, `create_revolve`, `create_linear_pattern`, `create_circular_pattern`, `create_boolean`
+- FeatureScript tools: `eval_featurescript`, `get_bounding_box`
+- Export tools: `export_part_studio`, `export_assembly`
+- API modules: `AssemblyManager`, `ExportManager`, `FeatureScriptManager`
+- Builders: `BooleanBuilder`, `ChamferBuilder`, `FilletBuilder`, `MateConnectorBuilder`, `MateBuilder`, `LinearPatternBuilder`, `CircularPatternBuilder`, `RevolveBuilder`
+- Knowledge base example: parametric bracket walkthrough
+
 ## [0.1.0] - 2025-02-20
 
 ### Added

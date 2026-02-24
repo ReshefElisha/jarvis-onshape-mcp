@@ -248,6 +248,34 @@ class TestPartStudioManager:
             )
 
     @pytest.mark.asyncio
+    async def test_get_part_bounding_box_success(
+        self, partstudio_manager, onshape_client, sample_document_ids
+    ):
+        """Test getting bounding box for a specific part."""
+        part_id = "JHD"
+        expected_bbox = {
+            "lowX": -0.01, "lowY": -0.02, "lowZ": -0.03,
+            "highX": 0.01, "highY": 0.02, "highZ": 0.03,
+        }
+
+        onshape_client.get = AsyncMock(return_value=expected_bbox)
+
+        result = await partstudio_manager.get_part_bounding_box(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            part_id,
+        )
+
+        assert result == expected_bbox
+        onshape_client.get.assert_called_once()
+
+        call_args = onshape_client.get.call_args
+        path = call_args[0][0]
+        assert part_id in path
+        assert "/boundingboxes" in path
+
+    @pytest.mark.asyncio
     async def test_get_plane_id_cache_different_contexts(self, partstudio_manager):
         """Test that different documents/workspaces get different cache entries."""
         # Different document

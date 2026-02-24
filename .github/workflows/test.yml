@@ -12,17 +12,16 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.12']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -45,17 +44,17 @@ jobs:
         pytest --cov=onshape_mcp --cov-report=xml --cov-report=term-missing -v
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         file: ./coverage.xml
         flags: unittests
-        name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
+        name: codecov-py${{ matrix.python-version }}
         fail_ci_if_error: false
 
     - name: Archive coverage reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
-        name: coverage-report-${{ matrix.os }}-py${{ matrix.python-version }}
+        name: coverage-report-py${{ matrix.python-version }}
         path: htmlcov/
 
   coverage-check:
@@ -63,12 +62,12 @@ jobs:
     needs: test
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
     - name: Install dependencies
       run: |

@@ -23,6 +23,17 @@ from .api.documents import DocumentManager
 from .builders.sketch import SketchBuilder, SketchPlane
 from .builders.extrude import ExtrudeBuilder, ExtrudeType
 from .builders.thicken import ThickenBuilder, ThickenType
+from .api.assemblies import AssemblyManager
+from .api.featurescript import FeatureScriptManager
+from .api.export import ExportManager
+from .builders.mate import MateBuilder, MateType, build_transform_matrix
+from .builders.fillet import FilletBuilder
+from .builders.chamfer import ChamferBuilder, ChamferType
+from .builders.revolve import RevolveBuilder, RevolveType
+from .builders.pattern import LinearPatternBuilder, CircularPatternBuilder
+from .builders.boolean import BooleanBuilder, BooleanType
+from .analysis.interference import check_assembly_interference, format_interference_result
+from .analysis.positioning import get_assembly_positions, set_absolute_position, align_to_face
 
 # Configure loguru to output to stderr
 logger.remove()  # Remove default handler
@@ -37,13 +48,16 @@ logger.add(
 app = Server("onshape-mcp")
 
 # Initialize Onshape client
-credentials = OnshapeCredentials(
-    access_key=os.getenv("ONSHAPE_ACCESS_KEY", ""), secret_key=os.getenv("ONSHAPE_SECRET_KEY", "")
-)
+_ak = os.getenv("ONSHAPE_ACCESS_KEY", "")
+_sk = os.getenv("ONSHAPE_SECRET_KEY", "")
+credentials = OnshapeCredentials(access_key=_ak, secret_key=_sk)
 client = OnshapeClient(credentials)
 partstudio_manager = PartStudioManager(client)
 variable_manager = VariableManager(client)
 document_manager = DocumentManager(client)
+assembly_manager = AssemblyManager(client)
+featurescript_manager = FeatureScriptManager(client)
+export_manager = ExportManager(client)
 
 
 @app.list_tools()
@@ -209,6 +223,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="delete_feature",
+            description="Delete a feature from a Part Studio",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "Feature ID to delete"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId"],
+            },
+        ),
+        Tool(
             name="list_documents",
             description="List documents in your Onshape account with optional filtering and sorting",
             inputSchema={
@@ -367,6 +395,474 @@ async def list_tools() -> list[Tool]:
                     "name": {"type": "string", "description": "Name for the new Part Studio"},
                 },
                 "required": ["documentId", "workspaceId", "name"],
+            },
+        ),
+        # === Assembly Tools ===
+        Tool(
+            name="create_assembly",
+            description="Create a new Assembly in an existing document",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "name": {"type": "string", "description": "Name for the new Assembly"},
+                },
+                "required": ["documentId", "workspaceId", "name"],
+            },
+        ),
+        Tool(
+            name="add_assembly_instance",
+            description="Add a part or sub-assembly instance to an assembly",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "partStudioElementId": {
+                        "type": "string",
+                        "description": "Element ID of the Part Studio or Assembly to instance",
+                    },
+                    "partId": {
+                        "type": "string",
+                        "description": "Optional specific part ID. If omitted, instances entire Part Studio.",
+                    },
+                    "isAssembly": {
+                        "type": "boolean",
+                        "description": "Whether to instance an assembly (vs a part studio)",
+                        "default": False,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "partStudioElementId"],
+            },
+        ),
+        Tool(
+            name="transform_instance",
+            description="Position/rotate an assembly instance using translation (inches) and rotation (degrees)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID to transform"},
+                    "translateX": {"type": "number", "description": "X translation in inches", "default": 0},
+                    "translateY": {"type": "number", "description": "Y translation in inches", "default": 0},
+                    "translateZ": {"type": "number", "description": "Z translation in inches", "default": 0},
+                    "rotateX": {"type": "number", "description": "X rotation in degrees", "default": 0},
+                    "rotateY": {"type": "number", "description": "Y rotation in degrees", "default": 0},
+                    "rotateZ": {"type": "number", "description": "Z rotation in degrees", "default": 0},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId"],
+            },
+        ),
+        Tool(
+            name="create_fastened_mate",
+            description="Create a fastened (rigid) mate between two assembly instances",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Fastened mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+            },
+        ),
+        Tool(
+            name="create_revolute_mate",
+            description="Create a revolute (rotation) mate between two assembly instances",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Revolute mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+            },
+        ),
+        # === Sketch Tools ===
+        Tool(
+            name="create_sketch_circle",
+            description="Create a circular sketch on a standard plane",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Sketch plane",
+                        "default": "Front",
+                    },
+                    "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
+                    "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
+                    "radius": {"type": "number", "description": "Radius in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "radius"],
+            },
+        ),
+        Tool(
+            name="create_sketch_line",
+            description="Create a line sketch on a standard plane",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Sketch plane",
+                        "default": "Front",
+                    },
+                    "startPoint": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Start point [x, y] in inches",
+                    },
+                    "endPoint": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "End point [x, y] in inches",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "startPoint", "endPoint"],
+            },
+        ),
+        Tool(
+            name="create_sketch_arc",
+            description="Create an arc sketch on a standard plane",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Sketch plane",
+                        "default": "Front",
+                    },
+                    "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
+                    "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
+                    "radius": {"type": "number", "description": "Radius in inches"},
+                    "startAngle": {
+                        "type": "number",
+                        "description": "Start angle in degrees (0 = positive X)",
+                        "default": 0,
+                    },
+                    "endAngle": {
+                        "type": "number",
+                        "description": "End angle in degrees",
+                        "default": 180,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "radius"],
+            },
+        ),
+        # === Feature Tools ===
+        Tool(
+            name="create_fillet",
+            description="Create a fillet (rounded edge) on one or more edges",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Fillet name", "default": "Fillet"},
+                    "radius": {"type": "number", "description": "Fillet radius in inches"},
+                    "edgeIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Deterministic IDs of edges to fillet",
+                    },
+                    "variableRadius": {"type": "string", "description": "Optional variable name for radius"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "radius", "edgeIds"],
+            },
+        ),
+        Tool(
+            name="create_chamfer",
+            description="Create a chamfer (beveled edge) on one or more edges",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Chamfer name", "default": "Chamfer"},
+                    "distance": {"type": "number", "description": "Chamfer distance in inches"},
+                    "edgeIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Deterministic IDs of edges to chamfer",
+                    },
+                    "variableDistance": {"type": "string", "description": "Optional variable name for distance"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "distance", "edgeIds"],
+            },
+        ),
+        Tool(
+            name="create_revolve",
+            description="Create a revolve feature by rotating a sketch around an axis",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Revolve name", "default": "Revolve"},
+                    "sketchFeatureId": {"type": "string", "description": "ID of sketch to revolve"},
+                    "axis": {
+                        "type": "string",
+                        "enum": ["X", "Y", "Z"],
+                        "description": "Axis of revolution",
+                        "default": "Y",
+                    },
+                    "angle": {"type": "number", "description": "Revolve angle in degrees", "default": 360},
+                    "operationType": {
+                        "type": "string",
+                        "enum": ["NEW", "ADD", "REMOVE", "INTERSECT"],
+                        "description": "Revolve operation type",
+                        "default": "NEW",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId"],
+            },
+        ),
+        Tool(
+            name="create_linear_pattern",
+            description="Create a linear pattern of features",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Pattern name", "default": "Linear pattern"},
+                    "featureIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Feature IDs to pattern",
+                    },
+                    "distance": {"type": "number", "description": "Distance between instances in inches"},
+                    "count": {"type": "integer", "description": "Total number of instances", "default": 2},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["X", "Y", "Z"],
+                        "description": "Pattern direction axis",
+                        "default": "X",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureIds", "distance"],
+            },
+        ),
+        Tool(
+            name="create_circular_pattern",
+            description="Create a circular pattern of features around an axis",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Pattern name", "default": "Circular pattern"},
+                    "featureIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Feature IDs to pattern",
+                    },
+                    "count": {"type": "integer", "description": "Total number of instances"},
+                    "angle": {"type": "number", "description": "Total angle spread in degrees", "default": 360},
+                    "axis": {
+                        "type": "string",
+                        "enum": ["X", "Y", "Z"],
+                        "description": "Pattern axis",
+                        "default": "Z",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureIds", "count"],
+            },
+        ),
+        Tool(
+            name="create_boolean",
+            description="Perform a boolean operation (union, subtract, intersect) on bodies",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Boolean name", "default": "Boolean"},
+                    "booleanType": {
+                        "type": "string",
+                        "enum": ["UNION", "SUBTRACT", "INTERSECT"],
+                        "description": "Boolean operation type",
+                    },
+                    "toolBodyIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Deterministic IDs of tool bodies",
+                    },
+                    "targetBodyIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Deterministic IDs of target bodies (for SUBTRACT/INTERSECT)",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "booleanType", "toolBodyIds"],
+            },
+        ),
+        # === FeatureScript Tools ===
+        Tool(
+            name="eval_featurescript",
+            description="Evaluate a FeatureScript expression in a Part Studio (read-only, for querying geometry)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "script": {"type": "string", "description": "FeatureScript lambda expression to evaluate"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "script"],
+            },
+        ),
+        Tool(
+            name="get_bounding_box",
+            description="Get the tight bounding box of all parts in a Part Studio",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        # === Export Tools ===
+        Tool(
+            name="export_part_studio",
+            description="Export a Part Studio to STL, STEP, or other format",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["STL", "STEP", "PARASOLID", "GLTF", "OBJ"],
+                        "description": "Export format",
+                        "default": "STL",
+                    },
+                    "partId": {"type": "string", "description": "Optional specific part ID to export"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="export_assembly",
+            description="Export an Assembly to STL, STEP, or other format",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["STL", "STEP", "GLTF"],
+                        "description": "Export format",
+                        "default": "STL",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="check_assembly_interference",
+            description="Check for overlapping/interfering parts in an assembly using bounding box detection. Returns which parts overlap and by how much.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="get_assembly_positions",
+            description="Get positions, sizes, and world-space bounds of all instances in an assembly (in inches)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="set_instance_position",
+            description="Set an instance to an ABSOLUTE position in inches (unlike transform_instance which is relative). Resets rotation to identity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID to position"},
+                    "x": {"type": "number", "description": "Absolute X position in inches"},
+                    "y": {"type": "number", "description": "Absolute Y position in inches"},
+                    "z": {"type": "number", "description": "Absolute Z position in inches"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId", "x", "y", "z"],
+            },
+        ),
+        Tool(
+            name="align_instance_to_face",
+            description="Position source instance flush against a face of target instance. Faces: front (min Y), back (max Y), left (min X), right (max X), bottom (min Z), top (max Z). Only moves the perpendicular axis; other axes stay unchanged.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "sourceInstanceId": {"type": "string", "description": "Instance ID to move"},
+                    "targetInstanceId": {"type": "string", "description": "Instance ID to align against"},
+                    "face": {
+                        "type": "string",
+                        "enum": ["front", "back", "left", "right", "top", "bottom"],
+                        "description": "Face of target to align source against",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sourceInstanceId", "targetInstanceId", "face"],
             },
         ),
     ]
@@ -659,6 +1155,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=f"Error getting features: {str(e)}",
                 )
             ]
+
+    elif name == "delete_feature":
+        try:
+            result = await partstudio_manager.delete_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
+            )
+            return [TextContent(type="text", text=f"Deleted feature {arguments['featureId']}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error deleting feature: API returned {e.response.status_code}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error deleting feature: {str(e)}")]
 
     elif name == "list_documents":
         try:
@@ -972,11 +1479,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     elif name == "get_assembly":
         try:
-            assembly_path = (
-                f"/api/v6/assemblies/d/{arguments['documentId']}"
-                f"/w/{arguments['workspaceId']}/e/{arguments['elementId']}"
+            assembly_data = await assembly_manager.get_assembly_definition(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
             )
-            assembly_data = await client.get(assembly_path)
 
             root_assembly = assembly_data.get("rootAssembly", {})
             instances = root_assembly.get("instances", [])
@@ -1087,6 +1594,431 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=f"Error creating Part Studio: {str(e)}",
                 )
             ]
+
+    elif name == "create_assembly":
+        try:
+            result = await assembly_manager.create_assembly(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                name=arguments["name"],
+            )
+            element_id = result.get("id", "unknown")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Created Assembly '{arguments['name']}'\nElement ID: {element_id}",
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating assembly: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating assembly: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating assembly")
+            return [TextContent(type="text", text=f"Error creating assembly: {str(e)}")]
+
+    elif name == "add_assembly_instance":
+        try:
+            result = await assembly_manager.add_instance(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                part_studio_element_id=arguments["partStudioElementId"],
+                part_id=arguments.get("partId"),
+                is_assembly=arguments.get("isAssembly", False),
+            )
+            instance_id = result.get("id", "unknown")
+            instance_name = result.get("name", "unnamed")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Added instance '{instance_name}' to assembly.\nInstance ID: {instance_id}",
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error adding instance: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error adding instance: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error adding instance")
+            return [TextContent(type="text", text=f"Error adding instance: {str(e)}")]
+
+    elif name == "transform_instance":
+        try:
+            transform = build_transform_matrix(
+                tx=arguments.get("translateX", 0),
+                ty=arguments.get("translateY", 0),
+                tz=arguments.get("translateZ", 0),
+                rx=arguments.get("rotateX", 0),
+                ry=arguments.get("rotateY", 0),
+                rz=arguments.get("rotateZ", 0),
+            )
+            occurrences = [{"path": [arguments["instanceId"]], "transform": transform}]
+            await assembly_manager.transform_occurrences(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                occurrences=occurrences,
+            )
+            return [TextContent(type="text", text=f"Transformed instance {arguments['instanceId']}.")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error transforming instance: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error transforming instance: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error transforming instance")
+            return [TextContent(type="text", text=f"Error transforming instance: {str(e)}")]
+
+    elif name == "create_fastened_mate":
+        try:
+            mate = MateBuilder(name=arguments.get("name", "Fastened mate"), mate_type=MateType.FASTENED)
+            mate.set_first_occurrence([arguments["firstInstanceId"]])
+            mate.set_second_occurrence([arguments["secondInstanceId"]])
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mate.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created fastened mate '{arguments.get('name', 'Fastened mate')}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_revolute_mate":
+        try:
+            mate = MateBuilder(name=arguments.get("name", "Revolute mate"), mate_type=MateType.REVOLUTE)
+            mate.set_first_occurrence([arguments["firstInstanceId"]])
+            mate.set_second_occurrence([arguments["secondInstanceId"]])
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mate.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created revolute mate '{arguments.get('name', 'Revolute mate')}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_sketch_circle":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            plane = SketchPlane[plane_name.upper()]
+            plane_id = await partstudio_manager.get_plane_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+            )
+            sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
+            sketch.add_circle(
+                center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
+                radius=arguments["radius"],
+            )
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created sketch with circle on {plane_name} plane. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating sketch circle: {str(e)}")]
+
+    elif name == "create_sketch_line":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            plane = SketchPlane[plane_name.upper()]
+            plane_id = await partstudio_manager.get_plane_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+            )
+            sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
+            sketch.add_line(
+                start=tuple(arguments["startPoint"]),
+                end=tuple(arguments["endPoint"]),
+            )
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created sketch with line on {plane_name} plane. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating sketch line: {str(e)}")]
+
+    elif name == "create_sketch_arc":
+        try:
+            plane_name = arguments.get("plane", "Front")
+            plane = SketchPlane[plane_name.upper()]
+            plane_id = await partstudio_manager.get_plane_id(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
+            )
+            sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
+            sketch.add_arc(
+                center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
+                radius=arguments["radius"],
+                start_angle=arguments.get("startAngle", 0),
+                end_angle=arguments.get("endAngle", 180),
+            )
+            feature_data = sketch.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created sketch with arc on {plane_name} plane. Feature ID: {feature_id}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating sketch arc: {str(e)}")]
+
+    elif name == "create_fillet":
+        try:
+            fillet = FilletBuilder(name=arguments.get("name", "Fillet"), radius=arguments["radius"])
+            for edge_id in arguments["edgeIds"]:
+                fillet.add_edge(edge_id)
+            if arguments.get("variableRadius"):
+                fillet.set_radius(arguments["radius"], variable_name=arguments["variableRadius"])
+            feature_data = fillet.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created fillet. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating fillet: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating fillet: {str(e)}")]
+
+    elif name == "create_chamfer":
+        try:
+            chamfer_type = ChamferType[arguments.get("chamferType", "EQUAL_OFFSETS")]
+            chamfer = ChamferBuilder(name=arguments.get("name", "Chamfer"), distance=arguments["distance"], chamfer_type=chamfer_type)
+            for edge_id in arguments["edgeIds"]:
+                chamfer.add_edge(edge_id)
+            if arguments.get("variableDistance"):
+                chamfer.set_distance(arguments["distance"], variable_name=arguments["variableDistance"])
+            feature_data = chamfer.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created chamfer. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating chamfer: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating chamfer: {str(e)}")]
+
+    elif name == "create_revolve":
+        try:
+            op_type = RevolveType[arguments.get("operationType", "NEW")]
+            revolve = RevolveBuilder(
+                name=arguments.get("name", "Revolve"),
+                sketch_feature_id=arguments["sketchFeatureId"],
+                axis=arguments.get("axis", "Y"),
+                angle=arguments.get("angle", 360.0),
+                operation_type=op_type,
+            )
+            feature_data = revolve.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created revolve. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating revolve: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating revolve: {str(e)}")]
+
+    elif name == "create_linear_pattern":
+        try:
+            pattern = LinearPatternBuilder(
+                name=arguments.get("name", "Linear pattern"),
+                distance=arguments["distance"],
+                count=arguments.get("count", 2),
+            )
+            for fid in arguments["featureIds"]:
+                pattern.add_feature(fid)
+            pattern.set_direction(arguments.get("direction", "X"))
+            feature_data = pattern.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created linear pattern. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating pattern: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating pattern: {str(e)}")]
+
+    elif name == "create_circular_pattern":
+        try:
+            pattern = CircularPatternBuilder(
+                name=arguments.get("name", "Circular pattern"),
+                count=arguments["count"],
+            )
+            pattern.set_angle(arguments.get("angle", 360.0))
+            pattern.set_axis(arguments.get("axis", "Z"))
+            for fid in arguments["featureIds"]:
+                pattern.add_feature(fid)
+            feature_data = pattern.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created circular pattern. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating pattern: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating pattern: {str(e)}")]
+
+    elif name == "create_boolean":
+        try:
+            bool_type = BooleanType[arguments["booleanType"]]
+            boolean = BooleanBuilder(name=arguments.get("name", "Boolean"), boolean_type=bool_type)
+            for body_id in arguments["toolBodyIds"]:
+                boolean.add_tool_body(body_id)
+            for body_id in arguments.get("targetBodyIds", []):
+                boolean.add_target_body(body_id)
+            feature_data = boolean.build()
+            result = await partstudio_manager.add_feature(
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            )
+            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
+            return [TextContent(type="text", text=f"Created boolean {arguments['booleanType'].lower()}. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error creating boolean: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error creating boolean: {str(e)}")]
+
+    elif name == "eval_featurescript":
+        try:
+            result = await featurescript_manager.evaluate(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                script=arguments["script"],
+            )
+            import json
+            return [TextContent(type="text", text=f"FeatureScript result:\n{json.dumps(result, indent=2)}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error evaluating FeatureScript: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error evaluating FeatureScript: {str(e)}")]
+
+    elif name == "get_bounding_box":
+        try:
+            result = await featurescript_manager.get_bounding_box(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+            import json
+            return [TextContent(type="text", text=f"Bounding box:\n{json.dumps(result, indent=2)}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting bounding box: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting bounding box: {str(e)}")]
+
+    elif name == "export_part_studio":
+        try:
+            result = await export_manager.export_part_studio(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                format_name=arguments.get("format", "STL"),
+                part_id=arguments.get("partId"),
+            )
+            translation_id = result.get("id", "unknown")
+            state = result.get("requestState", "unknown")
+            return [TextContent(type="text", text=f"Export started. Translation ID: {translation_id}\nState: {state}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error exporting: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error exporting: {str(e)}")]
+
+    elif name == "export_assembly":
+        try:
+            result = await export_manager.export_assembly(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                format_name=arguments.get("format", "STL"),
+            )
+            translation_id = result.get("id", "unknown")
+            state = result.get("requestState", "unknown")
+            return [TextContent(type="text", text=f"Export started. Translation ID: {translation_id}\nState: {state}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error exporting: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error exporting: {str(e)}")]
+
+    elif name == "check_assembly_interference":
+        try:
+            result = await check_assembly_interference(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+            return [TextContent(type="text", text=format_interference_result(result))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error checking interference: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error checking interference: {str(e)}")]
+
+    elif name == "get_assembly_positions":
+        try:
+            report = await get_assembly_positions(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+            return [TextContent(type="text", text=report)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting positions: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting positions: {str(e)}")]
+
+    elif name == "set_instance_position":
+        try:
+            msg = await set_absolute_position(
+                assembly_manager=assembly_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                instance_id=arguments["instanceId"],
+                x_inches=arguments["x"],
+                y_inches=arguments["y"],
+                z_inches=arguments["z"],
+            )
+            return [TextContent(type="text", text=msg)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error setting position: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error setting position: {str(e)}")]
+
+    elif name == "align_instance_to_face":
+        try:
+            msg = await align_to_face(
+                assembly_manager=assembly_manager,
+                partstudio_manager=partstudio_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                source_instance_id=arguments["sourceInstanceId"],
+                target_instance_id=arguments["targetInstanceId"],
+                face=arguments["face"],
+            )
+            return [TextContent(type="text", text=msg)]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error aligning instance: API returned {e.response.status_code}.")]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error aligning instance: {str(e)}")]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

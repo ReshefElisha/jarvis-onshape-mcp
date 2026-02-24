@@ -112,6 +112,26 @@ class PartStudioManager:
         response = await self.client.get(path)
         return response
 
+    async def get_part_bounding_box(
+        self, document_id: str, workspace_id: str, element_id: str, part_id: str
+    ) -> Dict[str, Any]:
+        """Get the bounding box for a specific part.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Part Studio element ID
+            part_id: Part ID
+
+        Returns:
+            Bounding box with lowX/Y/Z and highX/Y/Z in meters
+        """
+        path = (
+            f"/api/v6/parts/d/{document_id}/w/{workspace_id}"
+            f"/e/{element_id}/partid/{part_id}/boundingboxes"
+        )
+        return await self.client.get(path)
+
     async def create_part_studio(
         self, document_id: str, workspace_id: str, name: str
     ) -> Dict[str, Any]:

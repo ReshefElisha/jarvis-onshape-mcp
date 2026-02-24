@@ -37,7 +37,7 @@ class VariableManager:
         Returns:
             List of variables
         """
-        path = f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/variables"
+        path = f"/api/v6/variables/d/{document_id}/w/{workspace_id}/e/{element_id}/variables"
         response = await self.client.get(path)
 
         variables = []
@@ -74,12 +74,12 @@ class VariableManager:
         Returns:
             API response
         """
-        path = f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/variables"
+        path = f"/api/v6/variables/d/{document_id}/w/{workspace_id}/e/{element_id}/variables"
 
-        data = {"name": name, "expression": expression}
+        data = [{"name": name, "expression": expression}]
 
         if description:
-            data["description"] = description
+            data[0]["description"] = description
 
         return await self.client.post(path, data=data)
 
@@ -96,5 +96,5 @@ class VariableManager:
         Returns:
             Configuration definition
         """
-        path = f"/api/v9/elements/d/{document_id}/w/{workspace_id}/e/{element_id}/configuration"
+        path = f"/api/v6/elements/d/{document_id}/w/{workspace_id}/e/{element_id}/configuration"
         return await self.client.get(path)
