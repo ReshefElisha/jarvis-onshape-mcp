@@ -159,34 +159,32 @@ class DocumentManager:
         Returns:
             List of matching documents
         """
-        params = {"q": query, "limit": limit, "documentFilter": document_filter}
+        params = {"q": query, "limit": limit}
 
-        response = await self.client.get("/api/v5/globaltreenodes/search", params=params)
+        response = await self.client.get("/api/v6/documents", params=params)
 
         documents = []
-        for item in response.get("items", []):
-            if item.get("resourceType") == "document":
-                try:
-                    # Handle thumbnail - can be dict with 'href' or None
-                    thumbnail_data = item.get("thumbnail")
-                    thumbnail_url = None
-                    if thumbnail_data and isinstance(thumbnail_data, dict):
-                        thumbnail_url = thumbnail_data.get("href")
+        for doc_data in response.get("items", []):
+            try:
+                thumbnail_data = doc_data.get("thumbnail")
+                thumbnail_url = None
+                if thumbnail_data and isinstance(thumbnail_data, dict):
+                    thumbnail_url = thumbnail_data.get("href")
 
-                    doc = DocumentInfo(
-                        id=item.get("id"),
-                        name=item.get("name"),
-                        createdAt=item.get("createdAt"),
-                        modifiedAt=item.get("modifiedAt"),
-                        ownerId=item.get("owner", {}).get("id", ""),
-                        ownerName=item.get("owner", {}).get("name"),
-                        public=item.get("public", False),
-                        description=item.get("description"),
-                        thumbnail=thumbnail_url,
-                    )
-                    documents.append(doc)
-                except Exception:
-                    continue
+                doc = DocumentInfo(
+                    id=doc_data.get("id"),
+                    name=doc_data.get("name"),
+                    createdAt=doc_data.get("createdAt"),
+                    modifiedAt=doc_data.get("modifiedAt"),
+                    ownerId=doc_data.get("owner", {}).get("id", ""),
+                    ownerName=doc_data.get("owner", {}).get("name"),
+                    public=doc_data.get("public", False),
+                    description=doc_data.get("description"),
+                    thumbnail=thumbnail_url,
+                )
+                documents.append(doc)
+            except Exception:
+                continue
 
         return documents
 

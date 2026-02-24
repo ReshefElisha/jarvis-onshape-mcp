@@ -159,6 +159,9 @@ class OnshapeClient:
                 )
 
         response.raise_for_status()
+        if not response.content:
+            logger.debug(f"POST {url} returned empty body (status {response.status_code})")
+            return {}
         result = response.json()
         logger.debug(f"POST {url} response: {self._sanitize_for_logging(result, max_length=500)}")
         return result

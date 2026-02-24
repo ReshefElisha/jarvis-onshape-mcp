@@ -1,5 +1,6 @@
 """Sketch feature builder for Onshape."""
 
+import math
 from typing import Any, Dict, List, Tuple, Optional
 from enum import Enum
 
@@ -355,6 +356,282 @@ class SketchBuilder:
                     ],
                 }
             )
+
+        return self
+
+    def add_circle(
+        self,
+        center: Tuple[float, float],
+        radius: float,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add a circle to the sketch.
+
+        Args:
+            center: Center point (x, y) in inches
+            radius: Radius in inches
+            is_construction: Whether this is construction geometry
+
+        Returns:
+            Self for chaining
+        """
+        cx, cy = center
+
+        def to_meters(inches: float) -> float:
+            return inches * 0.0254
+
+        cx_m, cy_m = to_meters(cx), to_meters(cy)
+        radius_m = to_meters(radius)
+
+        circle_id = self._generate_entity_id("circle")
+
+        # Full circles require two semicircular arcs to form a closed region.
+        # A single BTMSketchCurveSegment with startParam=0 and endParam=2π
+        # is accepted by Onshape but doesn't render or create a sketch region.
+        arc1_id = f"{circle_id}.arc1"
+        arc2_id = f"{circle_id}.arc2"
+
+        # First semicircle: 0 to π
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": arc1_id,
+                "startPointId": f"{circle_id}.start",
+                "endPointId": f"{circle_id}.mid",
+                "startParam": 0.0,
+                "endParam": math.pi,
+                "geometry": {
+                    "btType": "BTCurveGeometryCircle-115",
+                    "radius": radius_m,
+                    "xCenter": cx_m,
+                    "yCenter": cy_m,
+                    "xDir": 1.0,
+                    "yDir": 0.0,
+                    "clockwise": False,
+                },
+                "centerId": f"{circle_id}.center",
+                "isConstruction": is_construction,
+            }
+        )
+
+        # Second semicircle: π to 2π
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": arc2_id,
+                "startPointId": f"{circle_id}.mid",
+                "endPointId": f"{circle_id}.start",
+                "startParam": math.pi,
+                "endParam": 2.0 * math.pi,
+                "geometry": {
+                    "btType": "BTCurveGeometryCircle-115",
+                    "radius": radius_m,
+                    "xCenter": cx_m,
+                    "yCenter": cy_m,
+                    "xDir": 1.0,
+                    "yDir": 0.0,
+                    "clockwise": False,
+                },
+                "centerId": f"{circle_id}.center",
+                "isConstruction": is_construction,
+            }
+        )
+
+        # Coincident constraints to close the circle
+        self.constraints.append(
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "COINCIDENT",
+                "entityId": f"{circle_id}.close1",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc1_id}.end",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc2_id}.start",
+                        "parameterId": "localSecond",
+                    },
+                ],
+            }
+        )
+        self.constraints.append(
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "COINCIDENT",
+                "entityId": f"{circle_id}.close2",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc2_id}.end",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": f"{arc1_id}.start",
+                        "parameterId": "localSecond",
+                    },
+                ],
+            }
+        )
+
+        return self
+
+    def add_arc(
+        self,
+        center: Tuple[float, float],
+        radius: float,
+        start_angle: float = 0.0,
+        end_angle: float = 180.0,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add an arc to the sketch.
+
+        Args:
+            center: Center point (x, y) in inches
+            radius: Radius in inches
+            start_angle: Start angle in degrees (0 = positive X direction)
+            end_angle: End angle in degrees
+            is_construction: Whether this is construction geometry
+
+        Returns:
+            Self for chaining
+        """
+        cx, cy = center
+
+        def to_meters(inches: float) -> float:
+            return inches * 0.0254
+
+        cx_m, cy_m = to_meters(cx), to_meters(cy)
+        radius_m = to_meters(radius)
+
+        start_rad = math.radians(start_angle)
+        end_rad = math.radians(end_angle)
+
+        arc_id = self._generate_entity_id("arc")
+
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": arc_id,
+                "startPointId": f"{arc_id}.start",
+                "endPointId": f"{arc_id}.end",
+                "startParam": start_rad,
+                "endParam": end_rad,
+                "geometry": {
+                    "btType": "BTCurveGeometryCircle-115",
+                    "radius": radius_m,
+                    "xCenter": cx_m,
+                    "yCenter": cy_m,
+                    "xDir": 1.0,
+                    "yDir": 0.0,
+                    "clockwise": False,
+                },
+                "centerId": f"{arc_id}.center",
+                "isConstruction": is_construction,
+            }
+        )
+
+        return self
+
+    def add_line(
+        self,
+        start: Tuple[float, float],
+        end: Tuple[float, float],
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add a line segment to the sketch.
+
+        Args:
+            start: Start point (x, y) in inches
+            end: End point (x, y) in inches
+            is_construction: Whether this is construction geometry
+
+        Returns:
+            Self for chaining
+        """
+        sx, sy = start
+        ex, ey = end
+
+        def to_meters(inches: float) -> float:
+            return inches * 0.0254
+
+        sx_m, sy_m = to_meters(sx), to_meters(sy)
+        ex_m, ey_m = to_meters(ex), to_meters(ey)
+
+        length = math.sqrt((ex_m - sx_m) ** 2 + (ey_m - sy_m) ** 2)
+        if length == 0:
+            raise ValueError("Line start and end points must be different")
+
+        dir_x = (ex_m - sx_m) / length
+        dir_y = (ey_m - sy_m) / length
+
+        line_id = self._generate_entity_id("line")
+
+        self.entities.append(
+            {
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": line_id,
+                "startPointId": f"{line_id}.start",
+                "endPointId": f"{line_id}.end",
+                "startParam": 0.0,
+                "endParam": length,
+                "geometry": {
+                    "btType": "BTCurveGeometryLine-117",
+                    "pntX": sx_m,
+                    "pntY": sy_m,
+                    "dirX": dir_x,
+                    "dirY": dir_y,
+                },
+                "isConstruction": is_construction,
+            }
+        )
+
+        return self
+
+    def add_polygon(
+        self,
+        center: Tuple[float, float],
+        sides: int,
+        radius: float,
+        is_construction: bool = False,
+    ) -> "SketchBuilder":
+        """Add a regular polygon to the sketch.
+
+        Creates a polygon inscribed in a circle of the given radius.
+
+        Args:
+            center: Center point (x, y) in inches
+            sides: Number of sides (3 for triangle, 6 for hexagon, etc.)
+            radius: Circumscribed radius in inches
+            is_construction: Whether this is construction geometry
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If sides < 3
+        """
+        if sides < 3:
+            raise ValueError("Polygon must have at least 3 sides")
+
+        cx, cy = center
+
+        # Calculate vertices
+        vertices = []
+        for i in range(sides):
+            angle = 2.0 * math.pi * i / sides - math.pi / 2  # Start from top
+            vx = cx + radius * math.cos(angle)
+            vy = cy + radius * math.sin(angle)
+            vertices.append((vx, vy))
+
+        # Add line segments between consecutive vertices
+        for i in range(sides):
+            start = vertices[i]
+            end = vertices[(i + 1) % sides]
+            self.add_line(start, end, is_construction=is_construction)
 
         return self
 
