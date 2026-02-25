@@ -15,60 +15,52 @@ class MateType(Enum):
 
 
 class MateConnectorBuilder:
-    """Builder for creating Onshape mate connector features (BTMMateConnector-66)."""
+    """Builder for creating Onshape assembly mate connector features (BTMMateConnector-66).
 
-    # Rotation angles (degrees) that align the connector's Z-axis with a world axis.
-    # Assumes Onshape's ZYZ Euler convention for mate connector rotation parameters.
-    AXIS_ROTATIONS = {
-        "Z": (0.0, 0.0, 0.0),
-        "Y": (-90.0, 90.0, 0.0),
-        "X": (180.0, 90.0, 0.0),
-    }
+    Creates mate connectors that reference specific faces on assembly instances
+    using BTMInferenceQueryWithOccurrence-1083 with CENTROID inference type.
+    The connector is placed at the center of the specified face with its primary
+    axis (Z-axis) aligned to the face normal.
+
+    Requires both a face deterministic ID and an occurrence path (instance ID)
+    to properly resolve geometry in the assembly context.
+    """
 
     def __init__(
         self,
         name: str = "Mate connector",
-        origin_x: float = 0.0,
-        origin_y: float = 0.0,
-        origin_z: float = 0.0,
-        axis: str = "Z",
+        face_id: Optional[str] = None,
+        occurrence_path: Optional[List[str]] = None,
     ):
         """Initialize mate connector builder.
 
         Args:
             name: Name of the mate connector feature
-            origin_x: X origin in inches
-            origin_y: Y origin in inches
-            origin_z: Z origin in inches
-            axis: Primary axis direction ("X", "Y", or "Z"). The connector's
-                  Z-axis will be aligned with this world axis. Controls the
-                  slide direction for slider mates. Default is "Z".
+            face_id: Deterministic ID of the face to place the connector on
+            occurrence_path: List of instance IDs defining the occurrence
         """
         self.name = name
-        self.origin_x = origin_x
-        self.origin_y = origin_y
-        self.origin_z = origin_z
-        self.occurrence_path: Optional[List[str]] = None
-        self._rotation0 = 0.0
-        self._rotation1 = 0.0
-        self._rotation2 = 0.0
-        if axis.upper() != "Z":
-            self.set_axis(axis)
+        self.face_id = face_id
+        self.occurrence_path = occurrence_path
+        self._flip_primary = False
+        self._secondary_axis_type = "PLUS_X"
+        self._transform_enabled = False
+        self._translation_x = 0.0
+        self._translation_y = 0.0
+        self._translation_z = 0.0
+        self._rotation_type = "ABOUT_Z"
+        self._rotation_angle = 0.0
 
-    def set_origin(self, x: float, y: float, z: float) -> "MateConnectorBuilder":
-        """Set the connector origin in inches.
+    def set_face(self, face_id: str) -> "MateConnectorBuilder":
+        """Set the face deterministic ID for the connector origin.
 
         Args:
-            x: X coordinate in inches
-            y: Y coordinate in inches
-            z: Z coordinate in inches
+            face_id: Deterministic ID of the face (from Part Studio body details)
 
         Returns:
             Self for chaining
         """
-        self.origin_x = x
-        self.origin_y = y
-        self.origin_z = z
+        self.face_id = face_id
         return self
 
     def set_occurrence(self, path: List[str]) -> "MateConnectorBuilder":
@@ -83,43 +75,78 @@ class MateConnectorBuilder:
         self.occurrence_path = path
         return self
 
-    def set_axis(self, axis: str) -> "MateConnectorBuilder":
-        """Set the connector's primary axis direction.
-
-        The mate connector's Z-axis will be aligned with the specified world axis.
-        For slider mates, this controls the slide direction.
+    def set_flip_primary(self, flip: bool = True) -> "MateConnectorBuilder":
+        """Flip the primary (Z) axis direction.
 
         Args:
-            axis: "X", "Y", or "Z"
+            flip: Whether to flip the primary axis
+
+        Returns:
+            Self for chaining
+        """
+        self._flip_primary = flip
+        return self
+
+    def set_secondary_axis(self, axis_type: str) -> "MateConnectorBuilder":
+        """Reorient the secondary axis around the primary axis.
+
+        Args:
+            axis_type: One of "PLUS_X", "PLUS_Y", "MINUS_X", "MINUS_Y"
 
         Returns:
             Self for chaining
 
         Raises:
-            ValueError: If axis is not X, Y, or Z
+            ValueError: If axis_type is not valid
         """
-        axis = axis.upper()
-        if axis not in self.AXIS_ROTATIONS:
-            raise ValueError(f"axis must be 'X', 'Y', or 'Z', got '{axis}'")
-        self._rotation0, self._rotation1, self._rotation2 = self.AXIS_ROTATIONS[axis]
+        valid = {"PLUS_X", "PLUS_Y", "MINUS_X", "MINUS_Y"}
+        if axis_type not in valid:
+            raise ValueError(f"axis_type must be one of {valid}, got '{axis_type}'")
+        self._secondary_axis_type = axis_type
         return self
 
-    def set_rotation(
-        self, rotation0: float = 0.0, rotation1: float = 0.0, rotation2: float = 0.0
-    ) -> "MateConnectorBuilder":
-        """Set explicit rotation angles for the connector orientation.
+    def set_translation(self, x: float, y: float, z: float) -> "MateConnectorBuilder":
+        """Set offset from face center in inches.
+
+        Enables the transform parameters on the mate connector.
 
         Args:
-            rotation0: First rotation angle in degrees
-            rotation1: Second rotation angle in degrees
-            rotation2: Third rotation angle in degrees
+            x: X offset in inches
+            y: Y offset in inches
+            z: Z offset in inches
 
         Returns:
             Self for chaining
         """
-        self._rotation0 = rotation0
-        self._rotation1 = rotation1
-        self._rotation2 = rotation2
+        self._transform_enabled = True
+        self._translation_x = x
+        self._translation_y = y
+        self._translation_z = z
+        return self
+
+    def set_rotation(
+        self, axis: str = "ABOUT_Z", angle: float = 0.0
+    ) -> "MateConnectorBuilder":
+        """Set rotation around an axis.
+
+        Enables the transform parameters on the mate connector.
+
+        Args:
+            axis: Rotation axis - "ABOUT_X", "ABOUT_Y", or "ABOUT_Z"
+            angle: Rotation angle in degrees
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If axis is not valid
+        """
+        valid = {"ABOUT_X", "ABOUT_Y", "ABOUT_Z"}
+        if axis not in valid:
+            raise ValueError(f"axis must be one of {valid}, got '{axis}'")
+        self._transform_enabled = True
+        self._rotation_type = axis
+        self._rotation_angle = angle
         return self
 
     def build(self) -> Dict[str, Any]:
@@ -128,82 +155,101 @@ class MateConnectorBuilder:
         Returns:
             Feature definition for Onshape API
         """
-        origin_x_meters = self.origin_x * 0.0254
-        origin_y_meters = self.origin_y * 0.0254
-        origin_z_meters = self.origin_z * 0.0254
+        parameters: List[Dict[str, Any]] = [
+            {
+                "btType": "BTMParameterEnum-145",
+                "parameterId": "originType",
+                "enumName": "Origin type",
+                "value": "ON_ENTITY",
+            },
+            {
+                "btType": "BTMParameterQueryWithOccurrenceList-67",
+                "parameterId": "originQuery",
+                "queries": [
+                    {
+                        "btType": "BTMInferenceQueryWithOccurrence-1083",
+                        "inferenceType": "CENTROID",
+                        "path": self.occurrence_path or [],
+                        "deterministicIds": [self.face_id] if self.face_id else [],
+                    }
+                ],
+            },
+        ]
+
+        if self._flip_primary:
+            parameters.append({
+                "btType": "BTMParameterBoolean-144",
+                "parameterId": "flipPrimary",
+                "value": True,
+            })
+
+        if self._secondary_axis_type != "PLUS_X":
+            parameters.append({
+                "btType": "BTMParameterEnum-145",
+                "parameterId": "secondaryAxisType",
+                "enumName": "Reorient secondary axis",
+                "value": self._secondary_axis_type,
+            })
+
+        if self._transform_enabled:
+            tx_m = self._translation_x * 0.0254
+            ty_m = self._translation_y * 0.0254
+            tz_m = self._translation_z * 0.0254
+            parameters.append({
+                "btType": "BTMParameterBoolean-144",
+                "parameterId": "transform",
+                "value": True,
+            })
+            parameters.extend([
+                {
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "translationX",
+                    "expression": f"{tx_m} m",
+                    "isInteger": False,
+                },
+                {
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "translationY",
+                    "expression": f"{ty_m} m",
+                    "isInteger": False,
+                },
+                {
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "translationZ",
+                    "expression": f"{tz_m} m",
+                    "isInteger": False,
+                },
+                {
+                    "btType": "BTMParameterEnum-145",
+                    "parameterId": "rotationType",
+                    "enumName": "Rotation axis",
+                    "value": self._rotation_type,
+                },
+                {
+                    "btType": "BTMParameterQuantity-147",
+                    "parameterId": "rotation",
+                    "expression": f"{math.radians(self._rotation_angle)} rad",
+                    "isInteger": False,
+                },
+            ])
 
         return {
             "feature": {
-                "btType": "BTMFeature-134",
+                "btType": "BTMMateConnector-66",
                 "featureType": "mateConnector",
                 "name": self.name,
                 "suppressed": False,
-                "parameters": [
-                    {
-                        "btType": "BTMParameterEnum-145",
-                        "parameterId": "originType",
-                        "enumName": "MateConnectorOriginType",
-                        "value": "ON_ENTITY",
-                    },
-                    {
-                        "btType": "BTMParameterQueryList-148",
-                        "parameterId": "originQuery",
-                        "queries": [
-                            {
-                                "btType": "BTMIndividualOccurrenceQuery-626",
-                                "path": self.occurrence_path or [],
-                            }
-                        ],
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "flipPrimary",
-                        "expression": "false",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "translationX",
-                        "expression": f"{origin_x_meters} m",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "translationY",
-                        "expression": f"{origin_y_meters} m",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "translationZ",
-                        "expression": f"{origin_z_meters} m",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "rotation0",
-                        "expression": f"{math.radians(self._rotation0)} rad",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "rotation1",
-                        "expression": f"{math.radians(self._rotation1)} rad",
-                        "isInteger": False,
-                    },
-                    {
-                        "btType": "BTMParameterQuantity-147",
-                        "parameterId": "rotation2",
-                        "expression": f"{math.radians(self._rotation2)} rad",
-                        "isInteger": False,
-                    },
-                ],
+                "parameters": parameters,
             }
         }
 
 
 class MateBuilder:
-    """Builder for creating Onshape assembly mates (BTMMate-64)."""
+    """Builder for creating Onshape assembly mates (BTMMate-64).
+
+    Mates reference explicit mate connector features by their feature IDs
+    using BTMFeatureQueryWithOccurrence-157.
+    """
 
     def __init__(
         self,
@@ -218,33 +264,33 @@ class MateBuilder:
         """
         self.name = name
         self.mate_type = mate_type
-        self.first_path: List[str] = []
-        self.second_path: List[str] = []
+        self.first_mc_id: Optional[str] = None
+        self.second_mc_id: Optional[str] = None
         self.min_limit: Optional[float] = None
         self.max_limit: Optional[float] = None
 
-    def set_first_occurrence(self, path: List[str]) -> "MateBuilder":
-        """Set the first occurrence path.
+    def set_first_connector(self, feature_id: str) -> "MateBuilder":
+        """Set the first mate connector by feature ID.
 
         Args:
-            path: List of instance IDs for the first occurrence
+            feature_id: Feature ID of the mate connector
 
         Returns:
             Self for chaining
         """
-        self.first_path = path
+        self.first_mc_id = feature_id
         return self
 
-    def set_second_occurrence(self, path: List[str]) -> "MateBuilder":
-        """Set the second occurrence path.
+    def set_second_connector(self, feature_id: str) -> "MateBuilder":
+        """Set the second mate connector by feature ID.
 
         Args:
-            path: List of instance IDs for the second occurrence
+            feature_id: Feature ID of the mate connector
 
         Returns:
             Self for chaining
         """
-        self.second_path = path
+        self.second_mc_id = feature_id
         return self
 
     def set_limits(self, min_value: float, max_value: float) -> "MateBuilder":
@@ -272,7 +318,7 @@ class MateBuilder:
         """
         feature_data = {
             "feature": {
-                "btType": "BTMFeature-134",
+                "btType": "BTMMate-64",
                 "featureType": "mate",
                 "name": self.name,
                 "suppressed": False,
@@ -280,26 +326,24 @@ class MateBuilder:
                     {
                         "btType": "BTMParameterEnum-145",
                         "parameterId": "mateType",
-                        "enumName": "MateType",
+                        "enumName": "Mate type",
                         "value": self.mate_type.value,
                     },
                     {
-                        "btType": "BTMParameterMateConnectorList-2020",
+                        "btType": "BTMParameterQueryWithOccurrenceList-67",
                         "parameterId": "mateConnectorsQuery",
-                        "mateConnectors": [
+                        "queries": [
                             {
-                                "btType": "BTMMateConnectorQuery-564",
-                                "implicitQuery": {
-                                    "btType": "BTMIndividualOccurrenceQuery-626",
-                                    "path": self.first_path,
-                                },
+                                "btType": "BTMFeatureQueryWithOccurrence-157",
+                                "featureId": self.first_mc_id or "",
+                                "path": [],
+                                "queryData": "",
                             },
                             {
-                                "btType": "BTMMateConnectorQuery-564",
-                                "implicitQuery": {
-                                    "btType": "BTMIndividualOccurrenceQuery-626",
-                                    "path": self.second_path,
-                                },
+                                "btType": "BTMFeatureQueryWithOccurrence-157",
+                                "featureId": self.second_mc_id or "",
+                                "path": [],
+                                "queryData": "",
                             },
                         ],
                     },

@@ -1094,7 +1094,11 @@ class TestAssemblyTools:
     async def test_create_fastened_mate_success(self, mock_asm):
         """Test creating a fastened mate."""
         mock_asm.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "mate123"}}
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "mate123"}},
+            ]
         )
 
         arguments = {
@@ -1103,6 +1107,8 @@ class TestAssemblyTools:
             "elementId": "asm123",
             "firstInstanceId": "inst1",
             "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
             "name": "MyMate",
         }
 
@@ -1110,6 +1116,7 @@ class TestAssemblyTools:
 
         assert "MyMate" in result[0].text
         assert "mate123" in result[0].text
+        assert mock_asm.add_feature.call_count == 3
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.assembly_manager")
@@ -1120,6 +1127,7 @@ class TestAssemblyTools:
         result = await call_tool("create_fastened_mate", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
         })
 
         assert "Error" in result[0].text
@@ -1129,7 +1137,11 @@ class TestAssemblyTools:
     async def test_create_revolute_mate_success(self, mock_asm):
         """Test creating a revolute mate."""
         mock_asm.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "rmate123"}}
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "rmate123"}},
+            ]
         )
 
         arguments = {
@@ -1138,6 +1150,8 @@ class TestAssemblyTools:
             "elementId": "asm123",
             "firstInstanceId": "inst1",
             "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
         }
 
         result = await call_tool("create_revolute_mate", arguments)
@@ -1150,7 +1164,11 @@ class TestAssemblyTools:
     async def test_create_slider_mate_success(self, mock_asm):
         """Test creating a slider mate."""
         mock_asm.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "slide123"}}
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "slide123"}},
+            ]
         )
         arguments = {
             "documentId": "doc123",
@@ -1158,6 +1176,8 @@ class TestAssemblyTools:
             "elementId": "asm123",
             "firstInstanceId": "inst1",
             "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
             "name": "Drawer Slide",
         }
         result = await call_tool("create_slider_mate", arguments)
@@ -1172,6 +1192,7 @@ class TestAssemblyTools:
         result = await call_tool("create_slider_mate", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
         })
         assert "Error" in result[0].text
 
@@ -1180,7 +1201,11 @@ class TestAssemblyTools:
     async def test_create_slider_mate_with_limits(self, mock_asm):
         """Test slider mate with travel limits."""
         mock_asm.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "slide456"}}
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "slide456"}},
+            ]
         )
         arguments = {
             "documentId": "doc123",
@@ -1188,12 +1213,14 @@ class TestAssemblyTools:
             "elementId": "asm123",
             "firstInstanceId": "inst1",
             "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
             "minLimit": -14.0,
             "maxLimit": 0.0,
         }
         result = await call_tool("create_slider_mate", arguments)
         assert "slide456" in result[0].text
-        # Verify limits were passed in the feature data
+        # Third call is the mate itself (after 2 mate connectors)
         call_args = mock_asm.add_feature.call_args
         feature_data = call_args.kwargs["feature_data"]
         params = feature_data["feature"]["parameters"]
@@ -1205,7 +1232,11 @@ class TestAssemblyTools:
     async def test_create_cylindrical_mate_success(self, mock_asm):
         """Test creating a cylindrical mate."""
         mock_asm.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "cyl123"}}
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "cyl123"}},
+            ]
         )
         arguments = {
             "documentId": "doc123",
@@ -1213,6 +1244,8 @@ class TestAssemblyTools:
             "elementId": "asm123",
             "firstInstanceId": "inst1",
             "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
         }
         result = await call_tool("create_cylindrical_mate", arguments)
         assert "Cylindrical mate" in result[0].text
@@ -1226,6 +1259,7 @@ class TestAssemblyTools:
         result = await call_tool("create_cylindrical_mate", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
         })
         assert "Error" in result[0].text
 
@@ -1241,8 +1275,8 @@ class TestAssemblyTools:
             "workspaceId": "ws123",
             "elementId": "asm123",
             "instanceId": "inst1",
+            "faceId": "JHW",
             "name": "Slide Connector",
-            "axis": "Y",
         }
         result = await call_tool("create_mate_connector", arguments)
         assert "Slide Connector" in result[0].text
@@ -1250,8 +1284,8 @@ class TestAssemblyTools:
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.assembly_manager")
-    async def test_create_mate_connector_default_axis(self, mock_asm):
-        """Test mate connector with default axis."""
+    async def test_create_mate_connector_default_values(self, mock_asm):
+        """Test mate connector with defaults."""
         mock_asm.add_feature = AsyncMock(
             return_value={"feature": {"featureId": "mc456"}}
         )
@@ -1260,6 +1294,7 @@ class TestAssemblyTools:
             "workspaceId": "ws123",
             "elementId": "asm123",
             "instanceId": "inst1",
+            "faceId": "JKW",
         }
         result = await call_tool("create_mate_connector", arguments)
         assert "mc456" in result[0].text
@@ -1271,9 +1306,181 @@ class TestAssemblyTools:
         mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
         result = await call_tool("create_mate_connector", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
-            "instanceId": "i",
+            "instanceId": "i", "faceId": "f1",
         })
         assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_revolute_mate_with_limits(self, mock_asm):
+        """Test revolute mate with rotation limits."""
+        mock_asm.add_feature = AsyncMock(
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "rev456"}},
+            ]
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "firstInstanceId": "inst1",
+            "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
+            "minLimit": -45.0,
+            "maxLimit": 90.0,
+        }
+        result = await call_tool("create_revolute_mate", arguments)
+        assert "rev456" in result[0].text
+        # Third call is the mate itself (after 2 mate connectors)
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+        assert "limitsEnabled" in param_ids
+        assert "limitRotationMin" in param_ids
+        assert "limitRotationMax" in param_ids
+        min_param = next(p for p in params if p["parameterId"] == "limitRotationMin")
+        assert "rad" in min_param["expression"]
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_revolute_mate_error(self, mock_asm):
+        """Test revolute mate error."""
+        mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("create_revolute_mate", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
+        })
+        assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_cylindrical_mate_with_limits(self, mock_asm):
+        """Test cylindrical mate with axial travel limits."""
+        mock_asm.add_feature = AsyncMock(
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "cyl456"}},
+            ]
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "firstInstanceId": "inst1",
+            "secondInstanceId": "inst2",
+            "firstFaceId": "JHW",
+            "secondFaceId": "JKW",
+            "minLimit": 0.0,
+            "maxLimit": 12.0,
+        }
+        result = await call_tool("create_cylindrical_mate", arguments)
+        assert "cyl456" in result[0].text
+        # Third call is the mate itself
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+        assert "limitsEnabled" in param_ids
+        assert "limitAxialZMin" in param_ids
+        assert "limitAxialZMax" in param_ids
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_slider_mate_feature_data_structure(self, mock_asm):
+        """Test that slider mate sends correct mate type in feature data."""
+        mock_asm.add_feature = AsyncMock(
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "s789"}},
+            ]
+        )
+        await call_tool("create_slider_mate", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
+        })
+        # Third call is the mate itself
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        type_param = next(p for p in params if p["parameterId"] == "mateType")
+        assert type_param["value"] == "SLIDER"
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_feature_data_structure(self, mock_asm):
+        """Test mate connector sends correct feature data structure."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "mc789"}}
+        )
+        arguments = {
+            "documentId": "doc123",
+            "workspaceId": "ws123",
+            "elementId": "asm123",
+            "instanceId": "inst1",
+            "faceId": "JHW",
+        }
+        result = await call_tool("create_mate_connector", arguments)
+        assert "mc789" in result[0].text
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        origin_type = next(p for p in params if p["parameterId"] == "originType")
+        assert origin_type["value"] == "ON_ENTITY"
+        origin_query = next(p for p in params if p["parameterId"] == "originQuery")
+        query = origin_query["queries"][0]
+        assert query["btType"] == "BTMInferenceQueryWithOccurrence-1083"
+        assert query["inferenceType"] == "CENTROID"
+        assert query["path"] == ["inst1"]
+        assert query["deterministicIds"] == ["JHW"]
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_with_flip_primary(self, mock_asm):
+        """Test mate connector flipPrimary parameter flows to feature data."""
+        mock_asm.add_feature = AsyncMock(
+            return_value={"feature": {"featureId": "mc_flip"}}
+        )
+        arguments = {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "instanceId": "inst1",
+            "faceId": "JHW",
+            "flipPrimary": True,
+        }
+        result = await call_tool("create_mate_connector", arguments)
+        assert "mc_flip" in result[0].text
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        flip = next(p for p in params if p["parameterId"] == "flipPrimary")
+        assert flip["value"] is True
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_fastened_mate_http_error(self, mock_asm):
+        """Test fastened mate with HTTP status error includes details."""
+        import httpx
+        response = Mock()
+        response.status_code = 400
+        response.text = "Bad request: invalid instance"
+        # Error on first add_feature call (mate connector creation)
+        mock_asm.add_feature = AsyncMock(
+            side_effect=httpx.HTTPStatusError("error", request=Mock(), response=response)
+        )
+        result = await call_tool("create_fastened_mate", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "a", "secondInstanceId": "b",
+            "firstFaceId": "f1", "secondFaceId": "f2",
+        })
+        assert "400" in result[0].text
+        assert "Bad request" in result[0].text
 
 
 class TestFeatureTools:

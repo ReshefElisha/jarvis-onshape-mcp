@@ -1,6 +1,7 @@
 """Assembly management for Onshape."""
 
 from typing import Any, Dict, List
+from urllib.parse import quote
 from .client import OnshapeClient
 
 
@@ -159,3 +160,24 @@ class AssemblyManager:
         """
         path = f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
         return await self.client.post(path, data=feature_data)
+
+    async def delete_feature(
+        self, document_id: str, workspace_id: str, element_id: str, feature_id: str
+    ) -> Dict[str, Any]:
+        """Delete a feature from an assembly (mates, mate connectors, etc.).
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Assembly element ID
+            feature_id: Feature ID to delete
+
+        Returns:
+            API response
+        """
+        encoded_fid = quote(feature_id, safe="")
+        path = (
+            f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}"
+            f"/features/featureid/{encoded_fid}"
+        )
+        return await self.client.delete(path)

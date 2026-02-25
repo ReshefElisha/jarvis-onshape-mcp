@@ -32,25 +32,25 @@ class TestMateConnectorBuilder:
     def test_initialization_with_defaults(self):
         mc = MateConnectorBuilder()
         assert mc.name == "Mate connector"
-        assert mc.origin_x == 0.0
-        assert mc.origin_y == 0.0
-        assert mc.origin_z == 0.0
+        assert mc.face_id is None
         assert mc.occurrence_path is None
+        assert mc._flip_primary is False
+        assert mc._secondary_axis_type == "PLUS_X"
+        assert mc._transform_enabled is False
 
     def test_initialization_with_custom_values(self):
-        mc = MateConnectorBuilder(name="MC1", origin_x=1.0, origin_y=2.0, origin_z=3.0)
+        mc = MateConnectorBuilder(
+            name="MC1", face_id="JHW", occurrence_path=["inst1"]
+        )
         assert mc.name == "MC1"
-        assert mc.origin_x == 1.0
-        assert mc.origin_y == 2.0
-        assert mc.origin_z == 3.0
+        assert mc.face_id == "JHW"
+        assert mc.occurrence_path == ["inst1"]
 
-    def test_set_origin(self):
+    def test_set_face(self):
         mc = MateConnectorBuilder()
-        result = mc.set_origin(5.0, 10.0, 15.0)
+        result = mc.set_face("JKW")
         assert result is mc
-        assert mc.origin_x == 5.0
-        assert mc.origin_y == 10.0
-        assert mc.origin_z == 15.0
+        assert mc.face_id == "JKW"
 
     def test_set_occurrence(self):
         mc = MateConnectorBuilder()
@@ -58,59 +58,181 @@ class TestMateConnectorBuilder:
         assert result is mc
         assert mc.occurrence_path == ["inst1", "inst2"]
 
+    def test_set_flip_primary(self):
+        mc = MateConnectorBuilder()
+        result = mc.set_flip_primary(True)
+        assert result is mc
+        assert mc._flip_primary is True
+
+    def test_set_secondary_axis(self):
+        mc = MateConnectorBuilder()
+        result = mc.set_secondary_axis("MINUS_Y")
+        assert result is mc
+        assert mc._secondary_axis_type == "MINUS_Y"
+
+    def test_set_secondary_axis_invalid_raises(self):
+        mc = MateConnectorBuilder()
+        with pytest.raises(ValueError, match="axis_type must be"):
+            mc.set_secondary_axis("INVALID")
+
+    def test_set_translation(self):
+        mc = MateConnectorBuilder()
+        result = mc.set_translation(1.0, 2.0, 3.0)
+        assert result is mc
+        assert mc._transform_enabled is True
+        assert mc._translation_x == 1.0
+        assert mc._translation_y == 2.0
+        assert mc._translation_z == 3.0
+
+    def test_set_rotation(self):
+        mc = MateConnectorBuilder()
+        result = mc.set_rotation("ABOUT_Y", 45.0)
+        assert result is mc
+        assert mc._transform_enabled is True
+        assert mc._rotation_type == "ABOUT_Y"
+        assert mc._rotation_angle == 45.0
+
+    def test_set_rotation_invalid_axis_raises(self):
+        mc = MateConnectorBuilder()
+        with pytest.raises(ValueError, match="axis must be"):
+            mc.set_rotation("ABOUT_W", 45.0)
+
     def test_method_chaining(self):
         mc = (
             MateConnectorBuilder(name="Chained")
-            .set_origin(1.0, 2.0, 3.0)
+            .set_face("JHW")
             .set_occurrence(["inst1"])
+            .set_flip_primary(True)
+            .set_secondary_axis("PLUS_Y")
         )
         assert mc.name == "Chained"
-        assert mc.origin_x == 1.0
+        assert mc.face_id == "JHW"
         assert mc.occurrence_path == ["inst1"]
+        assert mc._flip_primary is True
+        assert mc._secondary_axis_type == "PLUS_Y"
 
     def test_build_structure(self):
-        mc = MateConnectorBuilder(name="TestMC")
+        mc = MateConnectorBuilder(
+            name="TestMC", face_id="JHW", occurrence_path=["inst1"]
+        )
         result = mc.build()
 
         assert "feature" in result
         feature = result["feature"]
-        assert feature["btType"] == "BTMFeature-134"
+        assert feature["btType"] == "BTMMateConnector-66"
         assert feature["featureType"] == "mateConnector"
         assert feature["name"] == "TestMC"
         assert feature["suppressed"] is False
         assert "parameters" in feature
 
-    def test_build_converts_inches_to_meters(self):
-        mc = MateConnectorBuilder(origin_x=1.0, origin_y=2.0, origin_z=3.0)
+    def test_build_has_origin_type(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
         result = mc.build()
         params = result["feature"]["parameters"]
 
-        tx = next(p for p in params if p["parameterId"] == "translationX")
-        ty = next(p for p in params if p["parameterId"] == "translationY")
-        tz = next(p for p in params if p["parameterId"] == "translationZ")
+        origin_type = next(p for p in params if p["parameterId"] == "originType")
+        assert origin_type["btType"] == "BTMParameterEnum-145"
+        assert origin_type["enumName"] == "Origin type"
+        assert origin_type["value"] == "ON_ENTITY"
 
-        assert f"{1.0 * 0.0254} m" in tx["expression"]
-        assert f"{2.0 * 0.0254} m" in ty["expression"]
-        assert f"{3.0 * 0.0254} m" in tz["expression"]
+    def test_build_has_inference_query(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        result = mc.build()
+        params = result["feature"]["parameters"]
 
-    def test_build_with_occurrence_path(self):
-        mc = MateConnectorBuilder()
-        mc.set_occurrence(["inst1"])
+        origin_query = next(p for p in params if p["parameterId"] == "originQuery")
+        assert origin_query["btType"] == "BTMParameterQueryWithOccurrenceList-67"
+        query = origin_query["queries"][0]
+        assert query["btType"] == "BTMInferenceQueryWithOccurrence-1083"
+        assert query["inferenceType"] == "CENTROID"
+        assert query["path"] == ["inst1"]
+        assert query["deterministicIds"] == ["JHW"]
+
+    def test_build_without_face_id(self):
+        mc = MateConnectorBuilder(occurrence_path=["inst1"])
         result = mc.build()
         params = result["feature"]["parameters"]
 
         origin_query = next(p for p in params if p["parameterId"] == "originQuery")
         query = origin_query["queries"][0]
-        assert query["btType"] == "BTMIndividualOccurrenceQuery-626"
-        assert query["path"] == ["inst1"]
+        assert query["deterministicIds"] == []
 
     def test_build_without_occurrence_path(self):
-        mc = MateConnectorBuilder()
+        mc = MateConnectorBuilder(face_id="JHW")
         result = mc.build()
         params = result["feature"]["parameters"]
 
         origin_query = next(p for p in params if p["parameterId"] == "originQuery")
-        assert origin_query["queries"][0]["path"] == []
+        query = origin_query["queries"][0]
+        assert query["path"] == []
+
+    def test_build_default_no_flip_or_secondary(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        result = mc.build()
+        params = result["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+
+        assert "flipPrimary" not in param_ids
+        assert "secondaryAxisType" not in param_ids
+
+    def test_build_with_flip_primary(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        mc.set_flip_primary(True)
+        result = mc.build()
+        params = result["feature"]["parameters"]
+
+        flip = next(p for p in params if p["parameterId"] == "flipPrimary")
+        assert flip["btType"] == "BTMParameterBoolean-144"
+        assert flip["value"] is True
+
+    def test_build_with_secondary_axis(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        mc.set_secondary_axis("MINUS_X")
+        result = mc.build()
+        params = result["feature"]["parameters"]
+
+        secondary = next(p for p in params if p["parameterId"] == "secondaryAxisType")
+        assert secondary["btType"] == "BTMParameterEnum-145"
+        assert secondary["enumName"] == "Reorient secondary axis"
+        assert secondary["value"] == "MINUS_X"
+
+    def test_build_default_no_transform(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        result = mc.build()
+        params = result["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+
+        assert "transform" not in param_ids
+        assert "translationX" not in param_ids
+        assert "rotation" not in param_ids
+
+    def test_build_with_translation(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        mc.set_translation(1.0, 2.0, 3.0)
+        result = mc.build()
+        params = result["feature"]["parameters"]
+
+        transform = next(p for p in params if p["parameterId"] == "transform")
+        assert transform["value"] is True
+
+        tx = next(p for p in params if p["parameterId"] == "translationX")
+        ty = next(p for p in params if p["parameterId"] == "translationY")
+        tz = next(p for p in params if p["parameterId"] == "translationZ")
+        assert f"{1.0 * 0.0254} m" in tx["expression"]
+        assert f"{2.0 * 0.0254} m" in ty["expression"]
+        assert f"{3.0 * 0.0254} m" in tz["expression"]
+
+    def test_build_with_rotation(self):
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        mc.set_rotation("ABOUT_Y", 90.0)
+        result = mc.build()
+        params = result["feature"]["parameters"]
+
+        rot_type = next(p for p in params if p["parameterId"] == "rotationType")
+        assert rot_type["value"] == "ABOUT_Y"
+
+        rot = next(p for p in params if p["parameterId"] == "rotation")
+        assert f"{math.radians(90.0)} rad" in rot["expression"]
 
 
 class TestMateBuilder:
@@ -120,44 +242,44 @@ class TestMateBuilder:
         mb = MateBuilder()
         assert mb.name == "Mate"
         assert mb.mate_type == MateType.FASTENED
-        assert mb.first_path == []
-        assert mb.second_path == []
+        assert mb.first_mc_id is None
+        assert mb.second_mc_id is None
 
     def test_initialization_with_custom_values(self):
         mb = MateBuilder(name="RevMate", mate_type=MateType.REVOLUTE)
         assert mb.name == "RevMate"
         assert mb.mate_type == MateType.REVOLUTE
 
-    def test_set_first_occurrence(self):
+    def test_set_first_connector(self):
         mb = MateBuilder()
-        result = mb.set_first_occurrence(["inst1"])
+        result = mb.set_first_connector("mc_feat_1")
         assert result is mb
-        assert mb.first_path == ["inst1"]
+        assert mb.first_mc_id == "mc_feat_1"
 
-    def test_set_second_occurrence(self):
+    def test_set_second_connector(self):
         mb = MateBuilder()
-        result = mb.set_second_occurrence(["inst2"])
+        result = mb.set_second_connector("mc_feat_2")
         assert result is mb
-        assert mb.second_path == ["inst2"]
+        assert mb.second_mc_id == "mc_feat_2"
 
     def test_method_chaining(self):
         mb = (
             MateBuilder(name="Chained", mate_type=MateType.SLIDER)
-            .set_first_occurrence(["a"])
-            .set_second_occurrence(["b"])
+            .set_first_connector("mc_a")
+            .set_second_connector("mc_b")
         )
-        assert mb.first_path == ["a"]
-        assert mb.second_path == ["b"]
+        assert mb.first_mc_id == "mc_a"
+        assert mb.second_mc_id == "mc_b"
 
     def test_build_structure(self):
         mb = MateBuilder(name="TestMate")
-        mb.set_first_occurrence(["inst1"])
-        mb.set_second_occurrence(["inst2"])
+        mb.set_first_connector("mc1")
+        mb.set_second_connector("mc2")
         result = mb.build()
 
         assert "feature" in result
         feature = result["feature"]
-        assert feature["btType"] == "BTMFeature-134"
+        assert feature["btType"] == "BTMMate-64"
         assert feature["featureType"] == "mate"
         assert feature["name"] == "TestMate"
         assert feature["suppressed"] is False
@@ -172,21 +294,27 @@ class TestMateBuilder:
 
     def test_build_mate_connectors(self):
         mb = MateBuilder()
-        mb.set_first_occurrence(["inst1"])
-        mb.set_second_occurrence(["inst2"])
+        mb.set_first_connector("mc_feat_1")
+        mb.set_second_connector("mc_feat_2")
         result = mb.build()
         params = result["feature"]["parameters"]
 
         connector_list = next(
             p for p in params if p["parameterId"] == "mateConnectorsQuery"
         )
-        assert connector_list["btType"] == "BTMParameterMateConnectorList-2020"
-        assert len(connector_list["mateConnectors"]) == 2
+        assert connector_list["btType"] == "BTMParameterQueryWithOccurrenceList-67"
+        assert len(connector_list["queries"]) == 2
 
-        first = connector_list["mateConnectors"][0]
-        assert first["implicitQuery"]["path"] == ["inst1"]
-        second = connector_list["mateConnectors"][1]
-        assert second["implicitQuery"]["path"] == ["inst2"]
+        first = connector_list["queries"][0]
+        assert first["btType"] == "BTMFeatureQueryWithOccurrence-157"
+        assert first["featureId"] == "mc_feat_1"
+        assert first["path"] == []
+        assert first["queryData"] == ""
+        second = connector_list["queries"][1]
+        assert second["btType"] == "BTMFeatureQueryWithOccurrence-157"
+        assert second["featureId"] == "mc_feat_2"
+        assert second["path"] == []
+        assert second["queryData"] == ""
 
 
 class TestBuildTransformMatrix:
@@ -240,85 +368,6 @@ class TestBuildTransformMatrix:
         assert matrix[15] == 1.0
 
 
-class TestMateConnectorBuilderOrientation:
-    """Test MateConnectorBuilder orientation/axis support."""
-
-    def test_default_axis_is_z(self):
-        mc = MateConnectorBuilder()
-        assert mc._rotation0 == 0.0
-        assert mc._rotation1 == 0.0
-        assert mc._rotation2 == 0.0
-
-    def test_axis_y_sets_rotations(self):
-        mc = MateConnectorBuilder(axis="Y")
-        assert mc._rotation0 == -90.0
-        assert mc._rotation1 == 90.0
-        assert mc._rotation2 == 0.0
-
-    def test_axis_x_sets_rotations(self):
-        mc = MateConnectorBuilder(axis="X")
-        assert mc._rotation0 == 180.0
-        assert mc._rotation1 == 90.0
-        assert mc._rotation2 == 0.0
-
-    def test_set_axis_method_chaining(self):
-        mc = MateConnectorBuilder()
-        result = mc.set_axis("Y")
-        assert result is mc
-        assert mc._rotation1 == 90.0
-
-    def test_set_axis_invalid_raises_error(self):
-        mc = MateConnectorBuilder()
-        with pytest.raises(ValueError, match="axis must be"):
-            mc.set_axis("W")
-
-    def test_set_axis_case_insensitive(self):
-        mc = MateConnectorBuilder()
-        mc.set_axis("y")
-        assert mc._rotation0 == -90.0
-        assert mc._rotation1 == 90.0
-
-    def test_set_rotation_direct(self):
-        mc = MateConnectorBuilder()
-        result = mc.set_rotation(10.0, 20.0, 30.0)
-        assert result is mc
-        assert mc._rotation0 == 10.0
-        assert mc._rotation1 == 20.0
-        assert mc._rotation2 == 30.0
-
-    def test_build_includes_rotation_parameters(self):
-        mc = MateConnectorBuilder(axis="Y")
-        result = mc.build()
-        params = result["feature"]["parameters"]
-
-        r0 = next(p for p in params if p["parameterId"] == "rotation0")
-        r1 = next(p for p in params if p["parameterId"] == "rotation1")
-        r2 = next(p for p in params if p["parameterId"] == "rotation2")
-
-        assert "rad" in r0["expression"]
-        assert "rad" in r1["expression"]
-        assert "rad" in r2["expression"]
-
-    def test_build_default_rotation_is_zero(self):
-        mc = MateConnectorBuilder()
-        result = mc.build()
-        params = result["feature"]["parameters"]
-
-        r0 = next(p for p in params if p["parameterId"] == "rotation0")
-        assert "0.0 rad" in r0["expression"]
-
-    def test_build_rotation_values_correct(self):
-        mc = MateConnectorBuilder(axis="Y")
-        result = mc.build()
-        params = result["feature"]["parameters"]
-
-        r0 = next(p for p in params if p["parameterId"] == "rotation0")
-        r1 = next(p for p in params if p["parameterId"] == "rotation1")
-
-        assert f"{math.radians(-90.0)} rad" in r0["expression"]
-        assert f"{math.radians(90.0)} rad" in r1["expression"]
-
-
 class TestMateBuilderLimits:
     """Test MateBuilder limit support."""
 
@@ -336,8 +385,8 @@ class TestMateBuilderLimits:
 
     def test_build_without_limits_no_limit_params(self):
         mb = MateBuilder(mate_type=MateType.SLIDER)
-        mb.set_first_occurrence(["a"])
-        mb.set_second_occurrence(["b"])
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
         result = mb.build()
         params = result["feature"]["parameters"]
         param_ids = [p["parameterId"] for p in params]
@@ -345,8 +394,8 @@ class TestMateBuilderLimits:
 
     def test_build_slider_with_limits(self):
         mb = MateBuilder(mate_type=MateType.SLIDER)
-        mb.set_first_occurrence(["a"])
-        mb.set_second_occurrence(["b"])
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
         mb.set_limits(-2.0, 5.0)
         result = mb.build()
         params = result["feature"]["parameters"]
@@ -361,8 +410,8 @@ class TestMateBuilderLimits:
 
     def test_build_revolute_with_limits(self):
         mb = MateBuilder(mate_type=MateType.REVOLUTE)
-        mb.set_first_occurrence(["a"])
-        mb.set_second_occurrence(["b"])
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
         mb.set_limits(-45.0, 90.0)
         result = mb.build()
         params = result["feature"]["parameters"]
@@ -374,8 +423,8 @@ class TestMateBuilderLimits:
 
     def test_build_cylindrical_with_limits(self):
         mb = MateBuilder(mate_type=MateType.CYLINDRICAL)
-        mb.set_first_occurrence(["a"])
-        mb.set_second_occurrence(["b"])
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
         mb.set_limits(0, 12.0)
         result = mb.build()
         params = result["feature"]["parameters"]
@@ -388,8 +437,8 @@ class TestMateBuilderLimits:
     def test_build_fastened_with_limits_no_crash(self):
         """Fastened mates don't have limits, but setting them should not crash."""
         mb = MateBuilder(mate_type=MateType.FASTENED)
-        mb.set_first_occurrence(["a"])
-        mb.set_second_occurrence(["b"])
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
         mb.set_limits(0, 10)
         result = mb.build()
         params = result["feature"]["parameters"]
