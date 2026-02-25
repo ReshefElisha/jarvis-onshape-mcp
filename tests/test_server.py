@@ -6,9 +6,27 @@ import httpx
 from mcp.types import Tool, TextContent
 
 # Import the server module components
-from onshape_mcp.server import list_tools, call_tool
+from onshape_mcp.server import list_tools, call_tool, _extract_offsets
 from onshape_mcp.api.variables import Variable
 from onshape_mcp.api.documents import DocumentInfo, ElementInfo
+
+
+class TestExtractOffsets:
+    """Test the _extract_offsets helper."""
+
+    def test_all_zero_returns_none(self):
+        assert _extract_offsets({"firstOffsetX": 0, "firstOffsetY": 0, "firstOffsetZ": 0}, "first") is None
+
+    def test_missing_keys_returns_none(self):
+        assert _extract_offsets({}, "first") is None
+
+    def test_nonzero_returns_tuple(self):
+        args = {"firstOffsetX": 1.5, "firstOffsetY": -2.0, "firstOffsetZ": 0.0}
+        assert _extract_offsets(args, "first") == (1.5, -2.0, 0.0)
+
+    def test_second_prefix(self):
+        args = {"secondOffsetX": 0, "secondOffsetY": 0, "secondOffsetZ": 3.0}
+        assert _extract_offsets(args, "second") == (0, 0, 3.0)
 
 
 class TestListTools:
@@ -1122,6 +1140,40 @@ class TestAssemblyTools:
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_fastened_mate_with_offsets(self, mock_asm):
+        """Test creating a fastened mate with connector offsets."""
+        mock_asm.add_feature = AsyncMock(
+            side_effect=[
+                {"feature": {"featureId": "mc1_id"}},
+                {"feature": {"featureId": "mc2_id"}},
+                {"feature": {"featureId": "mate_offset"}},
+            ]
+        )
+
+        arguments = {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "firstInstanceId": "inst1", "secondInstanceId": "inst2",
+            "firstFaceId": "JHW", "secondFaceId": "JKW",
+            "name": "Offset Mate",
+            "firstOffsetX": 2.5, "firstOffsetY": -1.0,
+            "secondOffsetZ": 0.5,
+        }
+
+        result = await call_tool("create_fastened_mate", arguments)
+
+        assert "Offset Mate" in result[0].text
+        assert "mate_offset" in result[0].text
+        assert mock_asm.add_feature.call_count == 3
+        # Verify the MC builder received translation data by checking
+        # the feature data passed to the first add_feature call
+        mc1_data = mock_asm.add_feature.call_args_list[0][1]["feature_data"]
+        # The transform parameter should be present since offsets were provided
+        params = mc1_data["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+        assert "transform" in param_ids
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
     async def test_create_fastened_mate_error(self, mock_asm):
         """Test fastened mate error."""
         mock_asm.add_feature = AsyncMock(side_effect=Exception("fail"))
@@ -1463,6 +1515,25 @@ class TestAssemblyTools:
         params = feature_data["feature"]["parameters"]
         flip = next(p for p in params if p["parameterId"] == "flipPrimary")
         assert flip["value"] is True
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_create_mate_connector_with_offsets(self, mock_asm):
+        """Test mate connector with translation offsets."""
+        mock_asm.add_feature = AsyncMock(return_value={"feature": {"featureId": "mc_off"}})
+        arguments = {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "instanceId": "inst1", "faceId": "JHW",
+            "name": "Offset MC",
+            "offsetX": 3.0, "offsetY": -1.5, "offsetZ": 0.25,
+        }
+        result = await call_tool("create_mate_connector", arguments)
+        assert "mc_off" in result[0].text
+        call_args = mock_asm.add_feature.call_args
+        feature_data = call_args.kwargs["feature_data"]
+        params = feature_data["feature"]["parameters"]
+        param_ids = [p["parameterId"] for p in params]
+        assert "transform" in param_ids
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.assembly_manager")
@@ -1990,6 +2061,36 @@ class TestGetBodyDetails:
         assert "plane" in result[0].text
         assert "normal=" in result[0].text
         assert "cylinder" in result[0].text
+        assert "radius=" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_uppercase_surface_types(self, mock_ps):
+        """Test that uppercase surface types from the API are handled correctly."""
+        mock_ps.get_body_details = AsyncMock(return_value={
+            "bodies": [{
+                "id": "JHD",
+                "type": "SOLID",
+                "faces": [
+                    {
+                        "id": "JHW",
+                        "surface": {
+                            "type": "PLANE",
+                            "normal": {"x": 1.0, "y": 0.0, "z": 0.0},
+                            "origin": {"x": 0.01, "y": 0.0, "z": 0.0},
+                        },
+                    },
+                    {
+                        "id": "CYL1",
+                        "surface": {"type": "CYLINDER", "radius": 0.005},
+                    },
+                ],
+            }],
+        })
+        result = await call_tool("get_body_details", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "normal=" in result[0].text
         assert "radius=" in result[0].text
 
     @pytest.mark.asyncio

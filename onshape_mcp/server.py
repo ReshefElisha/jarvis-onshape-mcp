@@ -465,7 +465,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_fastened_mate",
-            description="Create a fastened (rigid) mate between two assembly instances. Requires face IDs from Part Studio body details to place mate connectors on specific faces.",
+            description="Create a fastened (rigid) mate between two assembly instances. Requires face IDs from Part Studio body details to place mate connectors on specific faces. Optional offsets shift connectors from face centers (in the face's local XY plane + Z along normal).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -477,13 +477,19 @@ async def list_tools() -> list[Tool]:
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
                     "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance (from body details)"},
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance (from body details)"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset from face center in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset from face center in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset (along face normal) in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset from face center in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset from face center in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset (along face normal) in inches", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
         ),
         Tool(
             name="create_revolute_mate",
-            description="Create a revolute (rotation) mate between two assembly instances. Requires face IDs from Part Studio body details.",
+            description="Create a revolute (rotation) mate between two assembly instances. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -497,13 +503,19 @@ async def list_tools() -> list[Tool]:
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
                     "minLimit": {"type": "number", "description": "Optional minimum rotation limit in degrees"},
                     "maxLimit": {"type": "number", "description": "Optional maximum rotation limit in degrees"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
         ),
         Tool(
             name="create_slider_mate",
-            description="Create a slider (linear motion) mate between two assembly instances. The slide direction is the face normal of the mate connectors. Requires face IDs from Part Studio body details.",
+            description="Create a slider (linear motion) mate between two assembly instances. The slide direction is the face normal of the mate connectors. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -517,13 +529,19 @@ async def list_tools() -> list[Tool]:
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
                     "minLimit": {"type": "number", "description": "Optional minimum travel limit in inches"},
                     "maxLimit": {"type": "number", "description": "Optional maximum travel limit in inches"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
         ),
         Tool(
             name="create_cylindrical_mate",
-            description="Create a cylindrical (slide + rotate) mate between two assembly instances. Requires face IDs from Part Studio body details.",
+            description="Create a cylindrical (slide + rotate) mate between two assembly instances. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -537,13 +555,19 @@ async def list_tools() -> list[Tool]:
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
                     "minLimit": {"type": "number", "description": "Optional minimum axial travel limit in inches"},
                     "maxLimit": {"type": "number", "description": "Optional maximum axial travel limit in inches"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
         ),
         Tool(
             name="create_mate_connector",
-            description="Create an explicit mate connector on a face of an assembly instance. The connector is placed at the face center with its Z-axis along the face normal.",
+            description="Create an explicit mate connector on a face of an assembly instance. The connector is placed at the face center with its Z-axis along the face normal. Optional offsets shift the connector from the face center in the face's local coordinate system.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -560,6 +584,9 @@ async def list_tools() -> list[Tool]:
                         "description": "Reorient secondary axis",
                         "default": "PLUS_X",
                     },
+                    "offsetX": {"type": "number", "description": "X offset from face center in inches", "default": 0},
+                    "offsetY": {"type": "number", "description": "Y offset from face center in inches", "default": 0},
+                    "offsetZ": {"type": "number", "description": "Z offset (along face normal) from face center in inches", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
@@ -969,6 +996,16 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+def _extract_offsets(arguments: dict, prefix: str) -> tuple[float, float, float] | None:
+    """Extract XYZ offset tuple from tool arguments, returning None if all zero."""
+    x = arguments.get(f"{prefix}OffsetX", 0)
+    y = arguments.get(f"{prefix}OffsetY", 0)
+    z = arguments.get(f"{prefix}OffsetZ", 0)
+    if x == 0 and y == 0 and z == 0:
+        return None
+    return (x, y, z)
+
+
 async def _create_mate(
     assembly_manager,
     document_id: str,
@@ -982,12 +1019,18 @@ async def _create_mate(
     mate_type: MateType,
     min_limit: float | None = None,
     max_limit: float | None = None,
+    first_offset: tuple[float, float, float] | None = None,
+    second_offset: tuple[float, float, float] | None = None,
 ) -> str:
     """Create a mate between two instances using explicit mate connectors.
 
     Creates mate connectors on faces of each instance, then creates the mate
     between them. Uses BTMInferenceQueryWithOccurrence-1083 with CENTROID
     inference to place connectors at face centers.
+
+    Args:
+        first_offset: Optional (x, y, z) offset in inches from first face centroid
+        second_offset: Optional (x, y, z) offset in inches from second face centroid
 
     Returns the mate feature ID.
     """
@@ -997,6 +1040,8 @@ async def _create_mate(
         face_id=first_face_id,
         occurrence_path=[first_instance_id],
     )
+    if first_offset:
+        mc1.set_translation(*first_offset)
     result1 = await assembly_manager.add_feature(
         document_id=document_id, workspace_id=workspace_id,
         element_id=element_id, feature_data=mc1.build(),
@@ -1009,6 +1054,8 @@ async def _create_mate(
         face_id=second_face_id,
         occurrence_path=[second_instance_id],
     )
+    if second_offset:
+        mc2.set_translation(*second_offset)
     result2 = await assembly_manager.add_feature(
         document_id=document_id, workspace_id=workspace_id,
         element_id=element_id, feature_data=mc2.build(),
@@ -1843,6 +1890,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 arguments["firstInstanceId"], arguments["secondInstanceId"],
                 arguments["firstFaceId"], arguments["secondFaceId"],
                 mate_name, MateType.FASTENED,
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
             return [TextContent(type="text", text=f"Created fastened mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
@@ -1867,6 +1916,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 arguments["firstFaceId"], arguments["secondFaceId"],
                 mate_name, MateType.REVOLUTE,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
             return [TextContent(type="text", text=f"Created revolute mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
@@ -1886,6 +1937,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 arguments["firstFaceId"], arguments["secondFaceId"],
                 mate_name, MateType.SLIDER,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
             return [TextContent(type="text", text=f"Created slider mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
@@ -1905,6 +1958,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 arguments["firstFaceId"], arguments["secondFaceId"],
                 mate_name, MateType.CYLINDRICAL,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
             return [TextContent(type="text", text=f"Created cylindrical mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
@@ -1926,6 +1981,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             secondary = arguments.get("secondaryAxisType")
             if secondary and secondary != "PLUS_X":
                 mc.set_secondary_axis(secondary)
+            ox = arguments.get("offsetX", 0)
+            oy = arguments.get("offsetY", 0)
+            oz = arguments.get("offsetZ", 0)
+            if ox != 0 or oy != 0 or oz != 0:
+                mc.set_translation(ox, oy, oz)
             result = await assembly_manager.add_feature(
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
@@ -2287,7 +2347,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     surface_type = surface.get("type", "unknown")
 
                     face_line = f"  Face `{face_id}`: {surface_type}"
-                    if surface_type == "plane":
+                    stype_lower = surface_type.lower()
+                    if stype_lower == "plane":
                         normal = surface.get("normal", {})
                         origin = surface.get("origin", {})
                         nx = normal.get("x", 0)
@@ -2298,7 +2359,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                         oz = origin.get("z", 0)
                         face_line += f" | normal=({nx:.4f}, {ny:.4f}, {nz:.4f})"
                         face_line += f" | origin=({ox:.6f}, {oy:.6f}, {oz:.6f})m"
-                    elif surface_type == "cylinder":
+                    elif stype_lower == "cylinder":
                         radius = surface.get("radius", 0)
                         face_line += f" | radius={radius:.6f}m"
 
