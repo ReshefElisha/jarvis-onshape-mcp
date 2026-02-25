@@ -287,3 +287,36 @@ class TestPartStudioManager:
         # Both should be same value but cached separately
         assert plane_id1 == plane_id2 == "JCC"
         assert len(partstudio_manager._plane_id_cache) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_body_details_success(
+        self, partstudio_manager, onshape_client, sample_document_ids
+    ):
+        """Test getting body details from a Part Studio."""
+        expected_response = {
+            "bodies": [
+                {
+                    "id": "JHD",
+                    "type": "solid",
+                    "faces": [
+                        {"id": "JHW", "surface": {"type": "plane", "normal": {"x": 1, "y": 0, "z": 0}}},
+                    ],
+                }
+            ]
+        }
+
+        onshape_client.get = AsyncMock(return_value=expected_response)
+
+        result = await partstudio_manager.get_body_details(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+        )
+
+        assert result == expected_response
+        onshape_client.get.assert_called_once()
+
+        call_args = onshape_client.get.call_args
+        path = call_args[0][0]
+        assert "/bodydetails" in path
+        assert sample_document_ids["document_id"] in path

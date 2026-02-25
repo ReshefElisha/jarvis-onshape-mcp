@@ -181,3 +181,19 @@ class AssemblyManager:
             f"/features/featureid/{encoded_fid}"
         )
         return await self.client.delete(path)
+
+    async def get_features(
+        self, document_id: str, workspace_id: str, element_id: str
+    ) -> Dict[str, Any]:
+        """Get all features from an assembly (mates, mate connectors, etc.).
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Assembly element ID
+
+        Returns:
+            Features data including feature list with states
+        """
+        path = f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+        return await self.client.get(path)

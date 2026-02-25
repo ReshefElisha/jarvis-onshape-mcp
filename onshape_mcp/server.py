@@ -940,6 +940,32 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId", "sourceInstanceId", "targetInstanceId", "face"],
             },
         ),
+        Tool(
+            name="get_body_details",
+            description="Get face-level geometry details for all parts in a Part Studio. Returns face deterministic IDs, surface types (PLANE, CYLINDER, etc.), and for planar faces: normal vectors and origin points. Use face IDs with mate connector tools.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="get_assembly_features",
+            description="Get all features (mates, mate connectors, etc.) from an assembly with their current state (OK, ERROR, SUPPRESSED). Useful for inspecting existing mates and debugging assembly issues.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
     ]
 
 
@@ -1638,6 +1664,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 inst_info += f"\n  Type: {instance.get('type', 'N/A')}"
                 if "partId" in instance:
                     inst_info += f"\n  Part ID: {instance['partId']}"
+                if "elementId" in instance:
+                    inst_info += f"\n  Element ID: {instance['elementId']}"
                 if "suppressed" in instance:
                     inst_info += f"\n  Suppressed: {instance['suppressed']}"
                 instance_list.append(inst_info)
@@ -2233,6 +2261,107 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error aligning instance: {str(e)}")]
+
+    elif name == "get_body_details":
+        try:
+            result = await partstudio_manager.get_body_details(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+
+            bodies = result.get("bodies", [])
+            if not bodies:
+                return [TextContent(type="text", text="No bodies found in Part Studio.")]
+
+            output_parts = []
+            for body in bodies:
+                body_id = body.get("id", "N/A")
+                body_type = body.get("type", "N/A")
+                part_header = f"**Body: {body_id}** (type: {body_type})"
+
+                faces_info = []
+                for face in body.get("faces", []):
+                    face_id = face.get("id", "N/A")
+                    surface = face.get("surface", {})
+                    surface_type = surface.get("type", "unknown")
+
+                    face_line = f"  Face `{face_id}`: {surface_type}"
+                    if surface_type == "plane":
+                        normal = surface.get("normal", {})
+                        origin = surface.get("origin", {})
+                        nx = normal.get("x", 0)
+                        ny = normal.get("y", 0)
+                        nz = normal.get("z", 0)
+                        ox = origin.get("x", 0)
+                        oy = origin.get("y", 0)
+                        oz = origin.get("z", 0)
+                        face_line += f" | normal=({nx:.4f}, {ny:.4f}, {nz:.4f})"
+                        face_line += f" | origin=({ox:.6f}, {oy:.6f}, {oz:.6f})m"
+                    elif surface_type == "cylinder":
+                        radius = surface.get("radius", 0)
+                        face_line += f" | radius={radius:.6f}m"
+
+                    faces_info.append(face_line)
+
+                output_parts.append(part_header + "\n" + "\n".join(faces_info))
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Body Details ({len(bodies)} bodies):\n\n" + "\n\n".join(output_parts),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting body details: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting body details: {str(e)}")]
+
+    elif name == "get_assembly_features":
+        try:
+            result = await assembly_manager.get_features(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+
+            features = result.get("features", [])
+            feature_states = result.get("featureStates", {})
+
+            if not features:
+                return [TextContent(type="text", text="No features found in assembly.")]
+
+            feature_lines = []
+            for i, feat in enumerate(features, 1):
+                feat_type = feat.get("typeName", feat.get("btType", "unknown"))
+                feat_id = feat.get("featureId", "N/A")
+                feat_name = feat.get("name", "Unnamed")
+                state_info = feature_states.get(feat_id, {})
+                state = state_info.get("featureStatus", "UNKNOWN")
+
+                line = f"{i}. **{feat_name}** ({feat_type})"
+                line += f"\n   ID: `{feat_id}` | State: {state}"
+
+                # For mates, show mate type
+                if feat_type == "mate" or feat.get("btType") == "BTMMate-64":
+                    params = feat.get("parameters", [])
+                    for p in params:
+                        if p.get("parameterId") == "mateType":
+                            line += f" | Type: {p.get('value', 'N/A')}"
+                            break
+
+                feature_lines.append(line)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Assembly Features ({len(features)}):\n\n" + "\n\n".join(feature_lines),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting assembly features: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting assembly features: {str(e)}")]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

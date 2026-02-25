@@ -95,6 +95,8 @@ class TestListTools:
         assert "create_slider_mate" in tool_names
         assert "create_cylindrical_mate" in tool_names
         assert "create_mate_connector" in tool_names
+        assert "get_body_details" in tool_names
+        assert "get_assembly_features" in tool_names
 
     @pytest.mark.asyncio
     async def test_list_tools_includes_feature_tools(self):
@@ -1944,6 +1946,175 @@ class TestAlignInstanceToFaceTool:
             "sourceInstanceId": "s1", "targetInstanceId": "t1", "face": "front",
         })
         assert "Error" in result[0].text
+
+
+class TestGetBodyDetails:
+    """Test get_body_details tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_success(self, mock_ps):
+        mock_ps.get_body_details = AsyncMock(return_value={
+            "bodies": [{
+                "id": "JHD",
+                "type": "solid",
+                "faces": [
+                    {
+                        "id": "JHW",
+                        "surface": {
+                            "type": "plane",
+                            "normal": {"x": 1.0, "y": 0.0, "z": 0.0},
+                            "origin": {"x": 0.01, "y": 0.0, "z": 0.0},
+                        },
+                    },
+                    {
+                        "id": "JHC",
+                        "surface": {
+                            "type": "plane",
+                            "normal": {"x": 0.0, "y": 0.0, "z": 1.0},
+                            "origin": {"x": 0.0, "y": 0.0, "z": 0.005},
+                        },
+                    },
+                    {
+                        "id": "CYL1",
+                        "surface": {"type": "cylinder", "radius": 0.005},
+                    },
+                ],
+            }],
+        })
+        result = await call_tool("get_body_details", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "JHD" in result[0].text
+        assert "JHW" in result[0].text
+        assert "plane" in result[0].text
+        assert "normal=" in result[0].text
+        assert "cylinder" in result[0].text
+        assert "radius=" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_no_bodies(self, mock_ps):
+        mock_ps.get_body_details = AsyncMock(return_value={"bodies": []})
+        result = await call_tool("get_body_details", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "No bodies" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_error(self, mock_ps):
+        mock_ps.get_body_details = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("get_body_details", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_http_error(self, mock_ps):
+        resp = Mock()
+        resp.status_code = 404
+        mock_ps.get_body_details = AsyncMock(
+            side_effect=httpx.HTTPStatusError("Not found", request=Mock(), response=resp)
+        )
+        result = await call_tool("get_body_details", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "404" in result[0].text
+
+
+class TestGetAssemblyFeatures:
+    """Test get_assembly_features tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_success(self, mock_asm):
+        mock_asm.get_features = AsyncMock(return_value={
+            "features": [
+                {
+                    "btType": "BTMMateConnector-66",
+                    "typeName": "mateConnector",
+                    "featureId": "mc1",
+                    "name": "MC 1",
+                    "parameters": [],
+                },
+                {
+                    "btType": "BTMMate-64",
+                    "typeName": "mate",
+                    "featureId": "mate1",
+                    "name": "Fastened Mate",
+                    "parameters": [
+                        {"parameterId": "mateType", "value": "FASTENED"},
+                    ],
+                },
+            ],
+            "featureStates": {
+                "mc1": {"featureStatus": "OK"},
+                "mate1": {"featureStatus": "OK"},
+            },
+        })
+        result = await call_tool("get_assembly_features", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        text = result[0].text
+        assert "MC 1" in text
+        assert "Fastened Mate" in text
+        assert "FASTENED" in text
+        assert "OK" in text
+        assert "mc1" in text
+        assert "mate1" in text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_no_features(self, mock_asm):
+        mock_asm.get_features = AsyncMock(return_value={"features": [], "featureStates": {}})
+        result = await call_tool("get_assembly_features", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "No features" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_error(self, mock_asm):
+        mock_asm.get_features = AsyncMock(side_effect=Exception("fail"))
+        result = await call_tool("get_assembly_features", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "Error" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_http_error(self, mock_asm):
+        resp = Mock()
+        resp.status_code = 403
+        mock_asm.get_features = AsyncMock(
+            side_effect=httpx.HTTPStatusError("Forbidden", request=Mock(), response=resp)
+        )
+        result = await call_tool("get_assembly_features", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "403" in result[0].text
+
+
+class TestGetAssemblyElementId:
+    """Test that get_assembly returns elementId for instances."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_element_id_shown(self, mock_asm):
+        mock_asm.get_assembly_definition = AsyncMock(return_value={
+            "rootAssembly": {
+                "instances": [
+                    {"id": "inst1", "name": "Part 1", "elementId": "elem_abc"},
+                ],
+            }
+        })
+        result = await call_tool("get_assembly", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+        })
+        assert "elem_abc" in result[0].text
+        assert "Element ID" in result[0].text
 
 
 class TestUnknownTool:
