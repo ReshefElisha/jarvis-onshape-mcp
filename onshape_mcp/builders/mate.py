@@ -362,31 +362,35 @@ class MateBuilder:
                 min_m = self.min_limit * 0.0254
                 max_m = self.max_limit * 0.0254
                 params.append({
-                    "btType": "BTMParameterQuantity-147",
-                    "parameterId": "limitAxialZMin",
+                    "btType": "BTMParameterNullableQuantity-807",
+                    "parameterId": "limitZMin",
                     "expression": f"{min_m} m",
                     "isInteger": False,
+                    "isNull": False,
                 })
                 params.append({
-                    "btType": "BTMParameterQuantity-147",
-                    "parameterId": "limitAxialZMax",
+                    "btType": "BTMParameterNullableQuantity-807",
+                    "parameterId": "limitZMax",
                     "expression": f"{max_m} m",
                     "isInteger": False,
+                    "isNull": False,
                 })
             elif self.mate_type == MateType.REVOLUTE:
                 min_rad = math.radians(self.min_limit)
                 max_rad = math.radians(self.max_limit)
                 params.append({
-                    "btType": "BTMParameterQuantity-147",
-                    "parameterId": "limitRotationMin",
+                    "btType": "BTMParameterNullableQuantity-807",
+                    "parameterId": "limitAxialZMin",
                     "expression": f"{min_rad} rad",
                     "isInteger": False,
+                    "isNull": False,
                 })
                 params.append({
-                    "btType": "BTMParameterQuantity-147",
-                    "parameterId": "limitRotationMax",
+                    "btType": "BTMParameterNullableQuantity-807",
+                    "parameterId": "limitAxialZMax",
                     "expression": f"{max_rad} rad",
                     "isInteger": False,
+                    "isNull": False,
                 })
 
         return feature_data

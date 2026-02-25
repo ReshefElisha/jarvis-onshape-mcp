@@ -403,8 +403,10 @@ class TestMateBuilderLimits:
         limits_enabled = next(p for p in params if p["parameterId"] == "limitsEnabled")
         assert limits_enabled["value"] is True
 
-        min_param = next(p for p in params if p["parameterId"] == "limitAxialZMin")
-        max_param = next(p for p in params if p["parameterId"] == "limitAxialZMax")
+        min_param = next(p for p in params if p["parameterId"] == "limitZMin")
+        max_param = next(p for p in params if p["parameterId"] == "limitZMax")
+        assert min_param["btType"] == "BTMParameterNullableQuantity-807"
+        assert min_param["isNull"] is False
         assert f"{-2.0 * 0.0254} m" in min_param["expression"]
         assert f"{5.0 * 0.0254} m" in max_param["expression"]
 
@@ -416,8 +418,10 @@ class TestMateBuilderLimits:
         result = mb.build()
         params = result["feature"]["parameters"]
 
-        min_param = next(p for p in params if p["parameterId"] == "limitRotationMin")
-        max_param = next(p for p in params if p["parameterId"] == "limitRotationMax")
+        min_param = next(p for p in params if p["parameterId"] == "limitAxialZMin")
+        max_param = next(p for p in params if p["parameterId"] == "limitAxialZMax")
+        assert min_param["btType"] == "BTMParameterNullableQuantity-807"
+        assert min_param["isNull"] is False
         assert "rad" in min_param["expression"]
         assert "rad" in max_param["expression"]
 
@@ -429,8 +433,10 @@ class TestMateBuilderLimits:
         result = mb.build()
         params = result["feature"]["parameters"]
 
-        min_param = next(p for p in params if p["parameterId"] == "limitAxialZMin")
-        max_param = next(p for p in params if p["parameterId"] == "limitAxialZMax")
+        min_param = next(p for p in params if p["parameterId"] == "limitZMin")
+        max_param = next(p for p in params if p["parameterId"] == "limitZMax")
+        assert min_param["btType"] == "BTMParameterNullableQuantity-807"
+        assert min_param["isNull"] is False
         assert f"{0 * 0.0254} m" in min_param["expression"]
         assert f"{12.0 * 0.0254} m" in max_param["expression"]
 
@@ -445,5 +451,5 @@ class TestMateBuilderLimits:
         param_ids = [p["parameterId"] for p in params]
         # limitsEnabled is added but no limit value params for FASTENED
         assert "limitsEnabled" in param_ids
+        assert "limitZMin" not in param_ids
         assert "limitAxialZMin" not in param_ids
-        assert "limitRotationMin" not in param_ids

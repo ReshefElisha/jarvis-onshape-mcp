@@ -1340,9 +1340,9 @@ class TestAssemblyTools:
         params = feature_data["feature"]["parameters"]
         param_ids = [p["parameterId"] for p in params]
         assert "limitsEnabled" in param_ids
-        assert "limitRotationMin" in param_ids
-        assert "limitRotationMax" in param_ids
-        min_param = next(p for p in params if p["parameterId"] == "limitRotationMin")
+        assert "limitAxialZMin" in param_ids
+        assert "limitAxialZMax" in param_ids
+        min_param = next(p for p in params if p["parameterId"] == "limitAxialZMin")
         assert "rad" in min_param["expression"]
 
     @pytest.mark.asyncio
@@ -1387,8 +1387,8 @@ class TestAssemblyTools:
         params = feature_data["feature"]["parameters"]
         param_ids = [p["parameterId"] for p in params]
         assert "limitsEnabled" in param_ids
-        assert "limitAxialZMin" in param_ids
-        assert "limitAxialZMax" in param_ids
+        assert "limitZMin" in param_ids
+        assert "limitZMax" in param_ids
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.assembly_manager")
