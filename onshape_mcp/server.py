@@ -26,7 +26,7 @@ from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
-from .builders.mate import MateBuilder, MateType, build_transform_matrix
+from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
 from .builders.chamfer import ChamferBuilder, ChamferType
 from .builders.revolve import RevolveBuilder, RevolveType
@@ -224,14 +224,20 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="delete_feature",
-            description="Delete a feature from a Part Studio",
+            description="Delete a feature from a Part Studio or Assembly",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "documentId": {"type": "string", "description": "Document ID"},
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
-                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "elementId": {"type": "string", "description": "Part Studio or Assembly element ID"},
                     "featureId": {"type": "string", "description": "Feature ID to delete"},
+                    "elementType": {
+                        "type": "string",
+                        "enum": ["PARTSTUDIO", "ASSEMBLY"],
+                        "description": "Type of element containing the feature",
+                        "default": "PARTSTUDIO",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "featureId"],
             },
@@ -439,7 +445,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="transform_instance",
-            description="Position/rotate an assembly instance using translation (inches) and rotation (degrees)",
+            description="Apply a RELATIVE transform to an assembly instance (inches and degrees). Note: fails on fixed/grounded instances — use get_assembly_positions to check the 'fixed' flag first.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -459,7 +465,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_fastened_mate",
-            description="Create a fastened (rigid) mate between two assembly instances",
+            description="Create a fastened (rigid) mate between two assembly instances. Requires face IDs from Part Studio body details to place mate connectors on specific faces. Optional offsets shift connectors from face centers (in the face's local XY plane + Z along normal).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -469,13 +475,21 @@ async def list_tools() -> list[Tool]:
                     "name": {"type": "string", "description": "Mate name", "default": "Fastened mate"},
                     "firstInstanceId": {"type": "string", "description": "First instance ID"},
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance (from body details)"},
+                    "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance (from body details)"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset from face center in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset from face center in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset (along face normal) in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset from face center in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset from face center in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset (along face normal) in inches", "default": 0},
                 },
-                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
         ),
         Tool(
             name="create_revolute_mate",
-            description="Create a revolute (rotation) mate between two assembly instances",
+            description="Create a revolute (rotation) mate between two assembly instances. The first instance rotates relative to the second around the mate connector Z-axis. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -485,8 +499,96 @@ async def list_tools() -> list[Tool]:
                     "name": {"type": "string", "description": "Mate name", "default": "Revolute mate"},
                     "firstInstanceId": {"type": "string", "description": "First instance ID"},
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance"},
+                    "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
+                    "minLimit": {"type": "number", "description": "Optional minimum rotation limit in degrees"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum rotation limit in degrees"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
                 },
-                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId"],
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
+            },
+        ),
+        Tool(
+            name="create_slider_mate",
+            description="Create a slider (linear motion) mate between two assembly instances. The first instance slides relative to the second — positive travel moves the first instance along the face normal direction away from the second. Swap instance order to reverse slide direction. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Slider mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance"},
+                    "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
+                    "minLimit": {"type": "number", "description": "Optional minimum travel limit in inches"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum travel limit in inches"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
+            },
+        ),
+        Tool(
+            name="create_cylindrical_mate",
+            description="Create a cylindrical (slide + rotate) mate between two assembly instances. The first instance slides and rotates relative to the second along the mate connector Z-axis. Requires face IDs from Part Studio body details. Optional offsets shift connectors from face centers.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "name": {"type": "string", "description": "Mate name", "default": "Cylindrical mate"},
+                    "firstInstanceId": {"type": "string", "description": "First instance ID"},
+                    "secondInstanceId": {"type": "string", "description": "Second instance ID"},
+                    "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance"},
+                    "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
+                    "minLimit": {"type": "number", "description": "Optional minimum axial travel limit in inches"},
+                    "maxLimit": {"type": "number", "description": "Optional maximum axial travel limit in inches"},
+                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
+                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
+                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
+                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
+                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
+                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
+            },
+        ),
+        Tool(
+            name="create_mate_connector",
+            description="Create an explicit mate connector on a face of an assembly instance. The connector is placed at the face center with its Z-axis along the face normal. Offsets are in the connector's LOCAL coordinate system (X/Y in-plane, Z along normal). Flipping the Z-axis also reverses the other axes via the right-hand rule, which affects how offset translations map to world space.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID to attach the connector to"},
+                    "faceId": {"type": "string", "description": "Face deterministic ID (from Part Studio body details)"},
+                    "name": {"type": "string", "description": "Mate connector name", "default": "Mate connector"},
+                    "flipPrimary": {"type": "boolean", "description": "Flip the primary (Z) axis direction", "default": False},
+                    "secondaryAxisType": {
+                        "type": "string",
+                        "enum": ["PLUS_X", "PLUS_Y", "MINUS_X", "MINUS_Y"],
+                        "description": "Reorient secondary axis",
+                        "default": "PLUS_X",
+                    },
+                    "offsetX": {"type": "number", "description": "X offset from face center in inches", "default": 0},
+                    "offsetY": {"type": "number", "description": "Y offset from face center in inches", "default": 0},
+                    "offsetZ": {"type": "number", "description": "Z offset (along face normal) from face center in inches", "default": 0},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
         ),
         # === Sketch Tools ===
@@ -830,7 +932,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="set_instance_position",
-            description="Set an instance to an ABSOLUTE position in inches (unlike transform_instance which is relative). Resets rotation to identity.",
+            description="Set an instance to an ABSOLUTE position in inches (unlike transform_instance which is relative). Resets rotation to identity. Note: fails on fixed/grounded instances (API returns 400).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -865,7 +967,205 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId", "sourceInstanceId", "targetInstanceId", "face"],
             },
         ),
+        Tool(
+            name="get_body_details",
+            description="Get face-level geometry details for all parts in a Part Studio. Returns face deterministic IDs, surface types (PLANE, CYLINDER, etc.), and for planar faces: normal vectors and origin points. Use face IDs with mate connector tools.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="get_assembly_features",
+            description="Get all features (mates, mate connectors, etc.) from an assembly with their current state (OK, ERROR, SUPPRESSED). Useful for inspecting existing mates and debugging assembly issues.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="get_face_coordinate_system",
+            description=(
+                "Query the true outward-facing coordinate system for a face on an assembly instance. "
+                "Returns the guaranteed outward normal (Z-axis), tangent axes (X/Y), and origin. "
+                "More reliable than body details normals. Use this to verify face orientations before creating mates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {"type": "string", "description": "Instance ID containing the face"},
+                    "faceId": {"type": "string", "description": "Face deterministic ID (from body details)"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
+            },
+        ),
     ]
+
+
+METERS_TO_INCHES = 1 / 0.0254
+
+
+def _enrich_rectangular_body(
+    planar_faces: list[dict],
+) -> dict | None:
+    """Compute enriched face data for rectangular solids (6 planar faces).
+
+    Groups faces by normal axis, determines true outward normals,
+    computes face dimensions, and adds directional labels.
+
+    Returns None if the body doesn't appear to be a rectangular solid.
+    """
+    if len(planar_faces) != 6:
+        return None
+
+    # Group faces by dominant normal axis
+    axis_groups: dict[str, list[dict]] = {"x": [], "y": [], "z": []}
+    for face in planar_faces:
+        abs_nx = abs(face["nx"])
+        abs_ny = abs(face["ny"])
+        abs_nz = abs(face["nz"])
+        if abs_nx >= abs_ny and abs_nx >= abs_nz:
+            axis_groups["x"].append(face)
+        elif abs_ny >= abs_nx and abs_ny >= abs_nz:
+            axis_groups["y"].append(face)
+        else:
+            axis_groups["z"].append(face)
+
+    # Need exactly 2 faces per axis for a rectangular solid
+    if not all(len(g) == 2 for g in axis_groups.values()):
+        return None
+
+    # Sort each axis pair by origin coordinate; determine outward normals
+    faces_enriched: dict[str, dict] = {}
+    bbox: dict[str, float] = {}
+
+    axis_coord = {"x": "ox", "y": "oy", "z": "oz"}
+    outward_labels = {
+        "x": [("-X", "(-1, 0, 0)"), ("+X", "(+1, 0, 0)")],
+        "y": [("-Y", "(0, -1, 0)"), ("+Y", "(0, +1, 0)")],
+        "z": [("-Z", "(0, 0, -1)"), ("+Z", "(0, 0, +1)")],
+    }
+
+    for axis, group in axis_groups.items():
+        coord_key = axis_coord[axis]
+        sorted_faces = sorted(group, key=lambda f: f[coord_key])
+        bbox[f"{axis}_min"] = sorted_faces[0][coord_key]
+        bbox[f"{axis}_max"] = sorted_faces[1][coord_key]
+
+        for i, face in enumerate(sorted_faces):
+            label, outward = outward_labels[axis][i]
+            faces_enriched[face["id"]] = {
+                "label": label,
+                "outward_normal": outward,
+                "axis": axis,
+                "is_max": i == 1,
+            }
+
+    # Compute body dimensions in inches
+    lx = (bbox["x_max"] - bbox["x_min"]) * METERS_TO_INCHES
+    ly = (bbox["y_max"] - bbox["y_min"]) * METERS_TO_INCHES
+    lz = (bbox["z_max"] - bbox["z_min"]) * METERS_TO_INCHES
+
+    # Compute face dimensions (the two dimensions perpendicular to face normal)
+    face_dims = {"x": (ly, lz), "y": (lx, lz), "z": (lx, ly)}
+    for face_id, data in faces_enriched.items():
+        w, h = face_dims[data["axis"]]
+        data["width"] = w
+        data["height"] = h
+
+    return {"dimensions": (lx, ly, lz), "faces": faces_enriched}
+
+
+def _extract_offsets(arguments: dict, prefix: str) -> tuple[float, float, float] | None:
+    """Extract XYZ offset tuple from tool arguments, returning None if all zero."""
+    x = arguments.get(f"{prefix}OffsetX", 0)
+    y = arguments.get(f"{prefix}OffsetY", 0)
+    z = arguments.get(f"{prefix}OffsetZ", 0)
+    if x == 0 and y == 0 and z == 0:
+        return None
+    return (x, y, z)
+
+
+async def _create_mate(
+    assembly_manager,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    first_instance_id: str,
+    second_instance_id: str,
+    first_face_id: str,
+    second_face_id: str,
+    mate_name: str,
+    mate_type: MateType,
+    min_limit: float | None = None,
+    max_limit: float | None = None,
+    first_offset: tuple[float, float, float] | None = None,
+    second_offset: tuple[float, float, float] | None = None,
+) -> str:
+    """Create a mate between two instances using explicit mate connectors.
+
+    Creates mate connectors on faces of each instance, then creates the mate
+    between them. Uses BTMInferenceQueryWithOccurrence-1083 with CENTROID
+    inference to place connectors at face centers.
+
+    Args:
+        first_offset: Optional (x, y, z) offset in inches from first face centroid
+        second_offset: Optional (x, y, z) offset in inches from second face centroid
+
+    Returns the mate feature ID.
+    """
+    # Create explicit mate connector on a face of the first instance
+    mc1 = MateConnectorBuilder(
+        name=f"{mate_name} - MC1",
+        face_id=first_face_id,
+        occurrence_path=[first_instance_id],
+    )
+    if first_offset:
+        mc1.set_translation(*first_offset)
+    result1 = await assembly_manager.add_feature(
+        document_id=document_id, workspace_id=workspace_id,
+        element_id=element_id, feature_data=mc1.build(),
+    )
+    mc1_id = result1.get("feature", {}).get("featureId", "unknown")
+
+    # Create explicit mate connector on a face of the second instance
+    mc2 = MateConnectorBuilder(
+        name=f"{mate_name} - MC2",
+        face_id=second_face_id,
+        occurrence_path=[second_instance_id],
+    )
+    if second_offset:
+        mc2.set_translation(*second_offset)
+    result2 = await assembly_manager.add_feature(
+        document_id=document_id, workspace_id=workspace_id,
+        element_id=element_id, feature_data=mc2.build(),
+    )
+    mc2_id = result2.get("feature", {}).get("featureId", "unknown")
+
+    # Create the mate referencing the explicit mate connectors
+    mate = MateBuilder(name=mate_name, mate_type=mate_type)
+    mate.set_first_connector(mc1_id)
+    mate.set_second_connector(mc2_id)
+    if min_limit is not None and max_limit is not None:
+        mate.set_limits(min_limit, max_limit)
+    result = await assembly_manager.add_feature(
+        document_id=document_id, workspace_id=workspace_id,
+        element_id=element_id, feature_data=mate.build(),
+    )
+    return result.get("feature", {}).get("featureId", "unknown")
 
 
 @app.call_tool()
@@ -1158,9 +1458,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     elif name == "delete_feature":
         try:
-            result = await partstudio_manager.delete_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
-            )
+            element_type = arguments.get("elementType", "PARTSTUDIO")
+            if element_type == "ASSEMBLY":
+                result = await assembly_manager.delete_feature(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
+                )
+            else:
+                result = await partstudio_manager.delete_feature(
+                    arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
+                )
             return [TextContent(type="text", text=f"Deleted feature {arguments['featureId']}")]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error deleting feature: API returned {e.response.status_code}")]
@@ -1498,6 +1804,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 inst_info += f"\n  Type: {instance.get('type', 'N/A')}"
                 if "partId" in instance:
                     inst_info += f"\n  Part ID: {instance['partId']}"
+                if "elementId" in instance:
+                    inst_info += f"\n  Element ID: {instance['elementId']}"
                 if "suppressed" in instance:
                     inst_info += f"\n  Suppressed: {instance['suppressed']}"
                 instance_list.append(inst_info)
@@ -1668,17 +1976,43 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     elif name == "create_fastened_mate":
         try:
-            mate = MateBuilder(name=arguments.get("name", "Fastened mate"), mate_type=MateType.FASTENED)
-            mate.set_first_occurrence([arguments["firstInstanceId"]])
-            mate.set_second_occurrence([arguments["secondInstanceId"]])
-            result = await assembly_manager.add_feature(
-                document_id=arguments["documentId"],
-                workspace_id=arguments["workspaceId"],
-                element_id=arguments["elementId"],
-                feature_data=mate.build(),
+            mate_name = arguments.get("name", "Fastened mate")
+            feature_id = await _create_mate(
+                assembly_manager,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                arguments["firstInstanceId"], arguments["secondInstanceId"],
+                arguments["firstFaceId"], arguments["secondFaceId"],
+                mate_name, MateType.FASTENED,
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created fastened mate '{arguments.get('name', 'Fastened mate')}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=f"Created fastened mate '{mate_name}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            error_body = ""
+            try:
+                error_body = e.response.text[:500]
+            except Exception:
+                pass
+            logger.error(f"API error creating mate: {e.response.status_code} - {error_body}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}. Details: {error_body}")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_revolute_mate":
+        try:
+            mate_name = arguments.get("name", "Revolute mate")
+            feature_id = await _create_mate(
+                assembly_manager,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                arguments["firstInstanceId"], arguments["secondInstanceId"],
+                arguments["firstFaceId"], arguments["secondFaceId"],
+                mate_name, MateType.REVOLUTE,
+                min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
+            )
+            return [TextContent(type="text", text=f"Created revolute mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating mate: {e.response.status_code}")
             return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
@@ -1686,25 +2020,86 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             logger.exception("Unexpected error creating mate")
             return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
 
-    elif name == "create_revolute_mate":
+    elif name == "create_slider_mate":
         try:
-            mate = MateBuilder(name=arguments.get("name", "Revolute mate"), mate_type=MateType.REVOLUTE)
-            mate.set_first_occurrence([arguments["firstInstanceId"]])
-            mate.set_second_occurrence([arguments["secondInstanceId"]])
-            result = await assembly_manager.add_feature(
-                document_id=arguments["documentId"],
-                workspace_id=arguments["workspaceId"],
-                element_id=arguments["elementId"],
-                feature_data=mate.build(),
+            mate_name = arguments.get("name", "Slider mate")
+            feature_id = await _create_mate(
+                assembly_manager,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                arguments["firstInstanceId"], arguments["secondInstanceId"],
+                arguments["firstFaceId"], arguments["secondFaceId"],
+                mate_name, MateType.SLIDER,
+                min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created revolute mate '{arguments.get('name', 'Revolute mate')}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=f"Created slider mate '{mate_name}'. Feature ID: {feature_id}")]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating mate: {e.response.status_code}")
             return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
         except Exception as e:
             logger.exception("Unexpected error creating mate")
             return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_cylindrical_mate":
+        try:
+            mate_name = arguments.get("name", "Cylindrical mate")
+            feature_id = await _create_mate(
+                assembly_manager,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                arguments["firstInstanceId"], arguments["secondInstanceId"],
+                arguments["firstFaceId"], arguments["secondFaceId"],
+                mate_name, MateType.CYLINDRICAL,
+                min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
+                first_offset=_extract_offsets(arguments, "first"),
+                second_offset=_extract_offsets(arguments, "second"),
+            )
+            return [TextContent(type="text", text=f"Created cylindrical mate '{mate_name}'. Feature ID: {feature_id}")]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating mate: {e.response.status_code}")
+            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate")
+            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+
+    elif name == "create_mate_connector":
+        try:
+            mc = MateConnectorBuilder(
+                name=arguments.get("name", "Mate connector"),
+                face_id=arguments["faceId"],
+                occurrence_path=[arguments["instanceId"]],
+            )
+            if arguments.get("flipPrimary"):
+                mc.set_flip_primary(True)
+            secondary = arguments.get("secondaryAxisType")
+            if secondary and secondary != "PLUS_X":
+                mc.set_secondary_axis(secondary)
+            ox = arguments.get("offsetX", 0)
+            oy = arguments.get("offsetY", 0)
+            oz = arguments.get("offsetZ", 0)
+            if ox != 0 or oy != 0 or oz != 0:
+                mc.set_translation(ox, oy, oz)
+            result = await assembly_manager.add_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                feature_data=mc.build(),
+            )
+            feature_id = result.get("feature", {}).get("featureId", "unknown")
+            return [TextContent(type="text", text=f"Created mate connector '{arguments.get('name', 'Mate connector')}' on instance {arguments['instanceId']}. Feature ID: {feature_id}")]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+        except httpx.HTTPStatusError as e:
+            error_body = ""
+            try:
+                error_body = e.response.text[:500]
+            except Exception:
+                pass
+            logger.error(f"API error creating mate connector: {e.response.status_code} - {error_body}")
+            return [TextContent(type="text", text=f"Error creating mate connector: API returned {e.response.status_code}. Details: {error_body}")]
+        except Exception as e:
+            logger.exception("Unexpected error creating mate connector")
+            return [TextContent(type="text", text=f"Error creating mate connector: {str(e)}")]
 
     elif name == "create_sketch_circle":
         try:
@@ -2019,6 +2414,190 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error aligning instance: {str(e)}")]
+
+    elif name == "get_body_details":
+        try:
+            result = await partstudio_manager.get_body_details(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+
+            bodies = result.get("bodies", [])
+            if not bodies:
+                return [TextContent(type="text", text="No bodies found in Part Studio.")]
+
+            output_parts = []
+            for body in bodies:
+                body_id = body.get("id", "N/A")
+                body_type = body.get("type", "N/A")
+
+                faces = body.get("faces", [])
+
+                # Collect planar face data for enrichment
+                planar_data = []
+                for face in faces:
+                    surface = face.get("surface", {})
+                    if surface.get("type", "").lower() == "plane":
+                        normal = surface.get("normal", {})
+                        origin = surface.get("origin", {})
+                        planar_data.append({
+                            "id": face.get("id", "N/A"),
+                            "nx": normal.get("x", 0),
+                            "ny": normal.get("y", 0),
+                            "nz": normal.get("z", 0),
+                            "ox": origin.get("x", 0),
+                            "oy": origin.get("y", 0),
+                            "oz": origin.get("z", 0),
+                        })
+
+                enriched = _enrich_rectangular_body(planar_data)
+
+                if enriched:
+                    dims = enriched["dimensions"]
+                    part_header = f"**Body: {body_id}** (type: {body_type})"
+                    part_header += f"\n  Bounding box: {dims[0]:.3f}\" x {dims[1]:.3f}\" x {dims[2]:.3f}\" (X x Y x Z)"
+
+                    faces_info = []
+                    for face in faces:
+                        face_id = face.get("id", "N/A")
+                        surface = face.get("surface", {})
+                        surface_type = surface.get("type", "unknown")
+
+                        if face_id in enriched["faces"]:
+                            ef = enriched["faces"][face_id]
+                            face_line = f"  Face `{face_id}`: {surface_type}"
+                            face_line += f" | {ef['label']} face"
+                            face_line += f" | {ef['width']:.2f}\" x {ef['height']:.2f}\""
+                            face_line += f" | outward normal={ef['outward_normal']}"
+                        else:
+                            face_line = f"  Face `{face_id}`: {surface_type}"
+
+                        faces_info.append(face_line)
+
+                    faces_info.append("")
+                    faces_info.append(
+                        "  MC axes: Z=outward normal, X=world+X (for Y/Z faces). "
+                        "offsetZ>0 moves AWAY from body, <0 moves INTO body."
+                    )
+
+                    output_parts.append(part_header + "\n" + "\n".join(faces_info))
+                else:
+                    # Fallback to original format for non-rectangular bodies
+                    part_header = f"**Body: {body_id}** (type: {body_type})"
+                    faces_info = []
+                    for face in faces:
+                        face_id = face.get("id", "N/A")
+                        surface = face.get("surface", {})
+                        surface_type = surface.get("type", "unknown")
+                        face_line = f"  Face `{face_id}`: {surface_type}"
+                        stype_lower = surface_type.lower()
+                        if stype_lower == "plane":
+                            normal = surface.get("normal", {})
+                            origin = surface.get("origin", {})
+                            nx = normal.get("x", 0)
+                            ny = normal.get("y", 0)
+                            nz = normal.get("z", 0)
+                            ox = origin.get("x", 0)
+                            oy = origin.get("y", 0)
+                            oz = origin.get("z", 0)
+                            face_line += f" | normal=({nx:.4f}, {ny:.4f}, {nz:.4f})"
+                            face_line += f" | origin=({ox:.6f}, {oy:.6f}, {oz:.6f})m"
+                        elif stype_lower == "cylinder":
+                            radius = surface.get("radius", 0)
+                            face_line += f" | radius={radius:.6f}m"
+                        faces_info.append(face_line)
+                    output_parts.append(part_header + "\n" + "\n".join(faces_info))
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Body Details ({len(bodies)} bodies):\n\n" + "\n\n".join(output_parts),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting body details: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting body details: {str(e)}")]
+
+    elif name == "get_assembly_features":
+        try:
+            result = await assembly_manager.get_features(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+            )
+
+            features = result.get("features", [])
+            feature_states = result.get("featureStates", {})
+
+            if not features:
+                return [TextContent(type="text", text="No features found in assembly.")]
+
+            feature_lines = []
+            for i, feat in enumerate(features, 1):
+                feat_type = feat.get("typeName", feat.get("btType", "unknown"))
+                feat_id = feat.get("featureId", "N/A")
+                feat_name = feat.get("name", "Unnamed")
+                state_info = feature_states.get(feat_id, {})
+                state = state_info.get("featureStatus", "UNKNOWN")
+
+                line = f"{i}. **{feat_name}** ({feat_type})"
+                line += f"\n   ID: `{feat_id}` | State: {state}"
+
+                # For mates, show mate type
+                if feat_type == "mate" or feat.get("btType") == "BTMMate-64":
+                    params = feat.get("parameters", [])
+                    for p in params:
+                        if p.get("parameterId") == "mateType":
+                            line += f" | Type: {p.get('value', 'N/A')}"
+                            break
+
+                feature_lines.append(line)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Assembly Features ({len(features)}):\n\n" + "\n\n".join(feature_lines),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error getting assembly features: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error getting assembly features: {str(e)}")]
+
+    elif name == "get_face_coordinate_system":
+        try:
+            from .analysis.face_cs import query_face_coordinate_system
+
+            cs = await query_face_coordinate_system(
+                assembly_manager=assembly_manager,
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                instance_id=arguments["instanceId"],
+                face_id=arguments["faceId"],
+            )
+
+            ox, oy, oz = cs.origin_inches
+            zx, zy, zz = cs.z_axis
+            xx, xy, xz = cs.x_axis
+            yx, yy, yz = cs.y_axis
+
+            text = (
+                f"Face `{arguments['faceId']}` coordinate system on instance `{arguments['instanceId']}`:\n\n"
+                f"  Origin: ({ox:.4f}, {oy:.4f}, {oz:.4f}) inches\n"
+                f"  Z-axis (outward normal): ({zx:.6f}, {zy:.6f}, {zz:.6f})\n"
+                f"  X-axis: ({xx:.6f}, {xy:.6f}, {xz:.6f})\n"
+                f"  Y-axis: ({yx:.6f}, {yy:.6f}, {yz:.6f})"
+            )
+            return [TextContent(type="text", text=text)]
+        except RuntimeError as e:
+            return [TextContent(type="text", text=f"Error querying face CS: {str(e)}")]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"Error querying face CS: API returned {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error querying face CS: {str(e)}")]
 
     else:
         raise ValueError(f"Unknown tool: {name}")

@@ -185,6 +185,8 @@ class OnshapeClient:
         self._ensure_client()
         response = await self._client.delete(url, params=params, headers=headers)
         response.raise_for_status()
+        if not response.content:
+            return {}
         return response.json()
 
     async def close(self):
