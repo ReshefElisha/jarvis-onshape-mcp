@@ -6,16 +6,17 @@ Enhanced Model Context Protocol (MCP) server for programmatic CAD modeling with 
 
 This MCP server provides comprehensive programmatic access to Onshape's REST API, enabling:
 
-### ✨ Core Capabilities (35 tools)
+### Core Capabilities (45 tools)
 
-- **🔍 Document Discovery** - Search and list projects, find Part Studios, navigate workspaces
-- **📐 Parametric Sketches** - Rectangles, circles, lines, and arcs on standard planes
-- **⚙️ Feature Management** - Extrude, revolve, fillet, chamfer, boolean, and pattern features
-- **🏗️ Assembly Management** - Create assemblies, add instances, position parts, create mates
-- **📊 Variable Tables** - Read and write Onshape variable tables for parametric designs
-- **🧮 FeatureScript** - Evaluate FeatureScript expressions, get bounding boxes
-- **📦 Export** - Export Part Studios and Assemblies to STL, STEP, PARASOLID, GLTF, OBJ
-- **🗂️ Part Studio Management** - Create and manage Part Studios programmatically
+- **Document Discovery** - Search and list projects, find Part Studios, navigate workspaces
+- **Parametric Sketches** - Rectangles, circles, lines, and arcs on standard planes
+- **Feature Management** - Extrude, revolve, thicken, fillet, chamfer, boolean, and pattern features
+- **Assembly Management** - Create assemblies, add instances, position parts, create mates (fastened, slider, revolute, cylindrical)
+- **Assembly Analysis** - Interference checking, position verification, face coordinate systems, body details
+- **Variable Tables** - Read and write Onshape variable tables for parametric designs
+- **FeatureScript** - Evaluate FeatureScript expressions, get bounding boxes
+- **Export** - Export Part Studios and Assemblies to STL, STEP, PARASOLID, GLTF, OBJ
+- **Part Studio Management** - Create and manage Part Studios programmatically
 
 ## Installation
 
@@ -109,32 +110,48 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 
 ## Available Tools
 
-### 🔍 Document & Navigation Tools
+### Document & Navigation Tools
 
 | Tool | Description |
 |------|-------------|
-| `list_documents` | List documents with filtering (`filterType`, `sortBy`, `sortOrder`, `limit`) |
+| `list_documents` | List documents with filtering and sorting |
 | `search_documents` | Search documents by name or description |
 | `get_document` | Get detailed document information |
 | `get_document_summary` | Get comprehensive summary with workspaces and elements |
 | `find_part_studios` | Find Part Studios with optional name filtering |
 | `get_elements` | Get all elements (Part Studios, Assemblies, BOMs) in a workspace |
 | `get_parts` | Get all parts from a Part Studio |
-| `get_assembly` | Get assembly structure with instances and occurrences |
 | `create_document` | Create a new Onshape document |
 | `create_part_studio` | Create a new Part Studio in a document |
 
-### 🏗️ Assembly Tools
+### Assembly Tools
 
 | Tool | Description |
 |------|-------------|
 | `create_assembly` | Create a new Assembly in a document |
 | `add_assembly_instance` | Add a part or sub-assembly instance to an assembly |
-| `transform_instance` | Position/rotate an instance using translation (inches) and rotation (degrees) |
-| `create_fastened_mate` | Create a rigid mate between two instances |
-| `create_revolute_mate` | Create a rotational mate between two instances |
+| `get_assembly` | Get assembly structure with instances and occurrences |
+| `transform_instance` | Apply a relative transform (inches/degrees). Fails on fixed instances. |
+| `set_instance_position` | Set absolute position (resets rotation). Fails on fixed instances. |
+| `align_instance_to_face` | Align one instance flush against a face of another |
+| `create_mate_connector` | Create an explicit mate connector on a face with offsets |
+| `create_fastened_mate` | Create a rigid (fastened) mate between two instances |
+| `create_slider_mate` | Create a linear motion mate. First instance slides relative to second. |
+| `create_revolute_mate` | Create a rotational mate. First instance rotates relative to second. |
+| `create_cylindrical_mate` | Create a slide+rotate mate. First instance moves relative to second. |
+| `delete_feature` | Delete a feature (mate, mate connector, etc.) from an assembly or Part Studio |
 
-### 📐 Sketch Tools
+### Assembly Analysis Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_assembly_positions` | Get positions, sizes, and bounds of all instances (in inches) |
+| `get_assembly_features` | Get all features with their state (OK/ERROR/SUPPRESSED) |
+| `get_body_details` | Get face IDs, surface types, normals, and origins for all parts |
+| `get_face_coordinate_system` | Query the outward-facing coordinate system for a specific face |
+| `check_assembly_interference` | Check for overlapping/interfering parts using bounding box detection |
+
+### Sketch Tools
 
 | Tool | Description |
 |------|-------------|
@@ -145,11 +162,12 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 
 All sketch tools support `plane` (Front/Top/Right) and `name` parameters. Dimensions are in inches.
 
-### ⚙️ Feature Tools
+### Feature Tools
 
 | Tool | Description |
 |------|-------------|
-| `create_extrude` | Extrude a sketch with depth, optional variable reference, and operation type (NEW/ADD/REMOVE/INTERSECT) |
+| `create_extrude` | Extrude a sketch with depth, optional variable reference, and operation type |
+| `create_thicken` | Thicken a sketch into a solid with optional midplane/opposite direction |
 | `create_revolve` | Revolve a sketch around an axis (X/Y/Z) with angle and operation type |
 | `create_fillet` | Round edges by edge IDs with radius (supports variable references) |
 | `create_chamfer` | Bevel edges by edge IDs with distance (supports variable references) |
@@ -157,7 +175,7 @@ All sketch tools support `plane` (Front/Top/Right) and `name` parameters. Dimens
 | `create_circular_pattern` | Repeat features around an axis with count and angle spread |
 | `create_boolean` | Union, subtract, or intersect bodies by deterministic IDs |
 
-### 📊 Variable Tools
+### Variable & Feature Tools
 
 | Tool | Description |
 |------|-------------|
@@ -165,14 +183,14 @@ All sketch tools support `plane` (Front/Top/Right) and `name` parameters. Dimens
 | `set_variable` | Set or update a variable (e.g., `"0.75 in"`) |
 | `get_features` | Get all features from a Part Studio |
 
-### 🧮 FeatureScript Tools
+### FeatureScript Tools
 
 | Tool | Description |
 |------|-------------|
 | `eval_featurescript` | Evaluate a FeatureScript lambda expression (read-only) |
 | `get_bounding_box` | Get the tight bounding box of all parts in a Part Studio |
 
-### 📦 Export Tools
+### Export Tools
 
 | Tool | Description |
 |------|-------------|
@@ -184,11 +202,11 @@ All sketch tools support `plane` (Front/Top/Right) and `name` parameters. Dimens
 ```
 onshape_mcp/
 ├── api/
-│   ├── client.py         # HTTP client with authentication
+│   ├── client.py         # HTTP client with HMAC authentication
 │   ├── documents.py      # Document discovery & navigation
 │   ├── partstudio.py     # Part Studio management
 │   ├── variables.py      # Variable table management
-│   ├── assemblies.py     # Assembly lifecycle & mates
+│   ├── assemblies.py     # Assembly lifecycle, mates & features
 │   ├── export.py         # Part Studio & Assembly export
 │   └── featurescript.py  # FeatureScript evaluation
 ├── builders/
@@ -199,11 +217,15 @@ onshape_mcp/
 │   ├── chamfer.py        # Chamfer feature builder
 │   ├── boolean.py        # Boolean operations (union, subtract, intersect)
 │   ├── pattern.py        # Linear & circular pattern builders
-│   ├── mate.py           # Mate connector & mate builders
+│   ├── mate.py           # Mate connector & mate builders (face-based)
 │   └── thicken.py        # Thicken feature builder
+├── analysis/
+│   ├── interference.py   # Bounding-box interference detection
+│   ├── positioning.py    # Instance position queries & alignment
+│   └── face_cs.py        # Face coordinate system queries
 ├── tools/
 │   └── __init__.py       # MCP tool definitions
-└── server.py             # Main MCP server (35 tools)
+└── server.py             # Main MCP server (45 tools)
 ```
 
 ## Examples
@@ -262,7 +284,7 @@ await create_extrude(
 
 ### Running Tests
 
-The project has comprehensive test coverage with **353 unit tests**.
+The project has comprehensive test coverage with **471 unit tests**.
 
 ```bash
 # Run all tests
@@ -285,7 +307,7 @@ For detailed testing documentation, see [docs/TESTING.md](docs/TESTING.md).
 ### Code Formatting
 
 ```bash
-black .
+ruff format .
 ruff check .
 ```
 
@@ -314,43 +336,47 @@ ruff check .
 - **[docs/AGENT_CREATION_GUIDE.md](docs/AGENT_CREATION_GUIDE.md)** - Guide for creating CAD agents
 - **[docs/CREATING_CAD_EXPERT_AGENT.md](docs/CREATING_CAD_EXPERT_AGENT.md)** - Creating specialized CAD expert agents
 
-### Knowledge Base
+### Knowledge Base & Examples
+
+- **[knowledge_base/assembly_workflow_guide.md](knowledge_base/assembly_workflow_guide.md)** - Comprehensive assembly methodology (positioning, mates, solver behavior)
+- **[examples/cabinet_assembly.md](examples/cabinet_assembly.md)** - Complete worked example: cabinet with sliding drawers
 - **[knowledge_base/](knowledge_base/)** - Onshape feature examples and research
 
 ## Roadmap
 
-### Current Status ✅
+### Current Status
 
-- ✅ Document discovery and navigation (10 tools)
-- ✅ Sketch creation with rectangles, circles, lines, and arcs
-- ✅ Feature tools: extrude, revolve, fillet, chamfer, boolean, patterns
-- ✅ Assembly management with mates and transforms
-- ✅ Variable table management
-- ✅ FeatureScript evaluation and bounding box queries
-- ✅ Export to STL, STEP, PARASOLID, GLTF, OBJ
-- ✅ 353 comprehensive unit tests (86%+ coverage)
+- Document discovery and navigation (10 tools)
+- Sketch creation with rectangles, circles, lines, and arcs
+- Feature tools: extrude, revolve, thicken, fillet, chamfer, boolean, patterns
+- Full assembly management: fastened, slider, revolute, and cylindrical mates with face-based mate connectors
+- Assembly analysis: interference checking, position verification, face coordinate systems
+- Variable table management
+- FeatureScript evaluation and bounding box queries
+- Export to STL, STEP, PARASOLID, GLTF, OBJ
+- 471 comprehensive unit tests
+- Live-tested on multi-part assemblies (25-instance cabinet with 66 features)
 
-### In Research 🔬
+### In Research
 
-- 🔬 **Geometry-referenced sketch planes** - Create sketches on faces from existing features (see [docs/SKETCH_PLANE_REFERENCE_GUIDE.md](docs/SKETCH_PLANE_REFERENCE_GUIDE.md))
-- 🔬 Query API investigation - How to programmatically reference geometry
-- 🔬 Entity ID mapping - Understanding Onshape's internal ID system
+- **Geometry-referenced sketch planes** - Create sketches on faces from existing features (see [docs/SKETCH_PLANE_REFERENCE_GUIDE.md](docs/SKETCH_PLANE_REFERENCE_GUIDE.md))
+- Query API investigation - How to programmatically reference geometry
+- Entity ID mapping - Understanding Onshape's internal ID system
 
-### Near-Term Priorities 📋
+### Near-Term Priorities
 
 - [ ] Implement `create_sketch_on_geometry()` for carpentry-correct cabinet assembly
 - [ ] Sketch constraints (coincident, parallel, tangent, etc.)
-- [ ] Slider and cylindrical mate types
 - [ ] Pocket cuts and profiles for joinery (dados, rabbets)
 
-### Long-Term Goals 🎯
+### Long-Term Goals
 
 - [ ] Drawing creation
 - [ ] Bill of Materials (BOM) generation
 - [ ] Advanced constraints and relations
 - [ ] Configuration parameter support
 
-### Woodworking-Specific Features 🪚
+### Woodworking-Specific Features
 
 - [ ] Joinery library (dado, rabbet, mortise & tenon, dovetail)
 - [ ] Standard hardware patterns (shelf pins, drawer slides)

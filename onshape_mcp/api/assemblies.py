@@ -17,7 +17,11 @@ class AssemblyManager:
         self.client = client
 
     async def get_assembly_definition(
-        self, document_id: str, workspace_id: str, element_id: str
+        self,
+        document_id: str,
+        workspace_id: str,
+        element_id: str,
+        params: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Get the definition of an assembly.
 
@@ -25,12 +29,13 @@ class AssemblyManager:
             document_id: Document ID
             workspace_id: Workspace ID
             element_id: Assembly element ID
+            params: Optional query parameters (e.g. includeMateFeatures)
 
         Returns:
             Assembly definition data
         """
         path = f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}"
-        return await self.client.get(path)
+        return await self.client.get(path, params=params)
 
     async def create_assembly(
         self, document_id: str, workspace_id: str, name: str

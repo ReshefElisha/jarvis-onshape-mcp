@@ -2218,6 +2218,83 @@ class TestGetAssemblyElementId:
         assert "Element ID" in result[0].text
 
 
+class TestGetFaceCoordinateSystem:
+    """Test get_face_coordinate_system tool handler."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_success(self, mock_asm):
+        from onshape_mcp.analysis.face_cs import FaceCoordinateSystem
+
+        with patch(
+            "onshape_mcp.analysis.face_cs.query_face_coordinate_system",
+            new_callable=AsyncMock,
+            return_value=FaceCoordinateSystem(
+                origin_meters=(0.0254, 0.0508, 0.0762),
+                origin_inches=(1.0, 2.0, 3.0),
+                x_axis=(1.0, 0.0, 0.0),
+                y_axis=(0.0, 1.0, 0.0),
+                z_axis=(0.0, 0.0, 1.0),
+            ),
+        ) as mock_query:
+            result = await call_tool("get_face_coordinate_system", {
+                "documentId": "d", "workspaceId": "w", "elementId": "e",
+                "instanceId": "inst1", "faceId": "JHG",
+            })
+            text = result[0].text
+            assert "JHG" in text
+            assert "inst1" in text
+            assert "1.0000" in text  # origin X
+            assert "outward normal" in text
+            mock_query.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_runtime_error(self, mock_asm):
+        with patch(
+            "onshape_mcp.analysis.face_cs.query_face_coordinate_system",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Could not find resolved coordinate system"),
+        ):
+            result = await call_tool("get_face_coordinate_system", {
+                "documentId": "d", "workspaceId": "w", "elementId": "e",
+                "instanceId": "inst1", "faceId": "JHG",
+            })
+            assert "Error" in result[0].text
+            assert "Could not find resolved coordinate system" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_http_error(self, mock_asm):
+        resp = Mock()
+        resp.status_code = 500
+        with patch(
+            "onshape_mcp.analysis.face_cs.query_face_coordinate_system",
+            new_callable=AsyncMock,
+            side_effect=httpx.HTTPStatusError("Server error", request=Mock(), response=resp),
+        ):
+            result = await call_tool("get_face_coordinate_system", {
+                "documentId": "d", "workspaceId": "w", "elementId": "e",
+                "instanceId": "inst1", "faceId": "JHG",
+            })
+            assert "500" in result[0].text
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_generic_error(self, mock_asm):
+        with patch(
+            "onshape_mcp.analysis.face_cs.query_face_coordinate_system",
+            new_callable=AsyncMock,
+            side_effect=Exception("unexpected failure"),
+        ):
+            result = await call_tool("get_face_coordinate_system", {
+                "documentId": "d", "workspaceId": "w", "elementId": "e",
+                "instanceId": "inst1", "faceId": "JHG",
+            })
+            assert "Error" in result[0].text
+            assert "unexpected failure" in result[0].text
+
+
 class TestUnknownTool:
     """Test handling of unknown tools."""
 
