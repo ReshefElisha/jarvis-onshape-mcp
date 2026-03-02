@@ -280,3 +280,35 @@ class TestAssemblyManager:
         assert sample_document_ids["workspace_id"] in path
         assert sample_document_ids["element_id"] in path
         assert "/features" in path
+
+    @pytest.mark.asyncio
+    async def test_get_features_success(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Test getting features from an assembly."""
+        expected_response = {
+            "features": [
+                {"featureId": "mc1", "typeName": "mateConnector"},
+                {"featureId": "mate1", "typeName": "mate"},
+            ],
+            "featureStates": {
+                "mc1": {"featureStatus": "OK"},
+                "mate1": {"featureStatus": "OK"},
+            },
+        }
+
+        onshape_client.get = AsyncMock(return_value=expected_response)
+
+        result = await assembly_manager.get_features(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+        )
+
+        assert result == expected_response
+        onshape_client.get.assert_called_once()
+
+        call_args = onshape_client.get.call_args
+        path = call_args[0][0]
+        assert "/features" in path
+        assert sample_document_ids["document_id"] in path

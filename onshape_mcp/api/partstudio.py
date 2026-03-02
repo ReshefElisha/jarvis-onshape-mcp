@@ -183,3 +183,22 @@ class PartStudioManager:
         plane_id = standard_plane_ids[plane_name]
         self._plane_id_cache[cache_key] = plane_id
         return plane_id
+
+    async def get_body_details(
+        self, document_id: str, workspace_id: str, element_id: str
+    ) -> Dict[str, Any]:
+        """Get body details for all parts in a Part Studio.
+
+        Returns face-level geometry including deterministic IDs, surface types,
+        normals, and origin points for planar faces.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Part Studio element ID
+
+        Returns:
+            Body details data with faces and their geometry
+        """
+        path = f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/bodydetails"
+        return await self.client.get(path)
