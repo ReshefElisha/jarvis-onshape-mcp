@@ -1,10 +1,9 @@
 """Unit tests for face coordinate system query."""
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from onshape_mcp.analysis.face_cs import (
-    FaceCoordinateSystem,
     extract_mc_coordinate_system,
     query_face_coordinate_system,
 )
