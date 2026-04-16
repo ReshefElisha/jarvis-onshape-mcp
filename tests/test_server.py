@@ -1852,31 +1852,81 @@ class TestFeatureScriptTools:
 
 
 class TestExportTools:
-    """Test export tool handlers."""
+    """Test export tool handlers.
+
+    Handlers now block on the full translation lifecycle (start, poll, download)
+    and write bytes to disk before returning.
+    """
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.export_manager")
-    async def test_export_part_studio_success(self, mock_export):
-        """Test exporting a part studio."""
-        mock_export.export_part_studio = AsyncMock(
-            return_value={"id": "trans123", "requestState": "ACTIVE"}
+    async def test_export_part_studio_success(self, mock_export, tmp_path, monkeypatch):
+        """Success path writes bytes to EXPORT_DIR and surfaces the path."""
+        from onshape_mcp.api.export import TranslationResult
+
+        mock_export.export_part_studio_and_download = AsyncMock(
+            return_value=TranslationResult(
+                ok=True,
+                state="DONE",
+                translation_id="trans123",
+                format_name="STEP",
+                data=b"ISO-10303-21;\nHEADER;\nENDSEC;",
+                filename="trans123.step",
+            )
         )
+        monkeypatch.setattr("onshape_mcp.server.EXPORT_DIR", str(tmp_path))
 
         arguments = {
-            "documentId": "d", "workspaceId": "w", "elementId": "e",
-            "format": "STL",
+            "documentId": "d", "workspaceId": "w", "elementId": "elem789",
+            "format": "STEP",
         }
 
         result = await call_tool("export_part_studio", arguments)
+        text = result[0].text
 
-        assert "trans123" in result[0].text
-        assert "ACTIVE" in result[0].text
+        assert "Export DONE" in text
+        assert "trans123" in text
+        assert "STEP" in text
+        assert str(tmp_path) in text
+
+        import os
+        written = os.listdir(tmp_path)
+        assert written, "No file written to EXPORT_DIR"
+        with open(os.path.join(tmp_path, written[0]), "rb") as f:
+            assert f.read().startswith(b"ISO-10303-21")
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.export_manager")
+    async def test_export_part_studio_failed_state(self, mock_export):
+        """FAILED translation should produce a readable error, not a silent 'ACTIVE'."""
+        from onshape_mcp.api.export import TranslationResult
+
+        mock_export.export_part_studio_and_download = AsyncMock(
+            return_value=TranslationResult(
+                ok=False,
+                state="FAILED",
+                translation_id="trans_err",
+                format_name="STEP",
+                error_message="Tessellation failed on degenerate face",
+            )
+        )
+
+        result = await call_tool("export_part_studio", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "format": "STEP",
+        })
+
+        text = result[0].text
+        assert "FAILED" in text
+        assert "Tessellation failed" in text
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.export_manager")
     async def test_export_part_studio_error(self, mock_export):
-        """Test export part studio error."""
-        mock_export.export_part_studio = AsyncMock(side_effect=Exception("fail"))
+        """Unexpected exceptions become a text 'Error …' response."""
+        mock_export.export_part_studio_and_download = AsyncMock(
+            side_effect=Exception("fail")
+        )
 
         result = await call_tool("export_part_studio", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
@@ -1886,26 +1936,41 @@ class TestExportTools:
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.export_manager")
-    async def test_export_assembly_success(self, mock_export):
-        """Test exporting an assembly."""
-        mock_export.export_assembly = AsyncMock(
-            return_value={"id": "trans456", "requestState": "ACTIVE"}
+    async def test_export_assembly_success(self, mock_export, tmp_path, monkeypatch):
+        """Assembly export handler also writes bytes and returns path."""
+        from onshape_mcp.api.export import TranslationResult
+
+        mock_export.export_assembly_and_download = AsyncMock(
+            return_value=TranslationResult(
+                ok=True,
+                state="DONE",
+                translation_id="trans456",
+                format_name="STL",
+                data=b"solid asm\nendsolid asm\n",
+                filename="trans456.stl",
+            )
         )
+        monkeypatch.setattr("onshape_mcp.server.EXPORT_DIR", str(tmp_path))
 
         arguments = {
-            "documentId": "d", "workspaceId": "w", "elementId": "e",
-            "format": "STEP",
+            "documentId": "d", "workspaceId": "w", "elementId": "asmId",
+            "format": "STL",
         }
 
         result = await call_tool("export_assembly", arguments)
+        text = result[0].text
 
-        assert "trans456" in result[0].text
+        assert "Export DONE" in text
+        assert "trans456" in text
+        assert "STL" in text
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.export_manager")
     async def test_export_assembly_error(self, mock_export):
-        """Test export assembly error."""
-        mock_export.export_assembly = AsyncMock(side_effect=Exception("fail"))
+        """Assembly export handler wraps unexpected exceptions."""
+        mock_export.export_assembly_and_download = AsyncMock(
+            side_effect=Exception("fail")
+        )
 
         result = await call_tool("export_assembly", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
