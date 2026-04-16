@@ -43,6 +43,7 @@ from PIL import Image, ImageStat
 
 from onshape_mcp.api.client import OnshapeClient, OnshapeCredentials
 from onshape_mcp.api.documents import DocumentManager
+from onshape_mcp.api.entities import EntityManager
 from onshape_mcp.api.feature_apply import apply_feature_and_check
 from onshape_mcp.api.partstudio import PartStudioManager
 from onshape_mcp.api.rendering import (
@@ -223,4 +224,107 @@ async def test_e2e_bracket_full_stack(client):
             await client.delete(f"/api/v10/documents/{did}")
         except Exception:  # noqa: BLE001
             # Best-effort; surface via warning rather than masking a test failure.
+            pass
+
+
+@pytest.mark.asyncio
+async def test_sketch_on_top_face_creates_visible_boss(client):
+    """Stage a plate, discover its top face via `list_entities`, sketch a
+    5 mm circle on that face and extrude a 3 mm boss. Asserts:
+        - list_entities surfaces at least one +Z-normal PLANE face with
+          the highest z-origin (the top face)
+        - SketchBuilder + apply_feature_and_check accepts the face's
+          deterministic id as `plane_id` and returns status=="OK"
+        - the post-boss iso render differs from the pre-boss one
+    """
+    docs = DocumentManager(client)
+    ps_mgr = PartStudioManager(client)
+    entities = EntityManager(client)
+    renderer = ShadedViewManager(client)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    doc = await docs.create_document(name=f"dyna-mcp boss e2e {ts}")
+    did = doc.id
+    try:
+        wid = (await docs.get_workspaces(did))[0].id
+        eid = (await ps_mgr.create_part_studio(did, wid, name="plate"))["id"]
+        top_plane_id = await ps_mgr.get_plane_id(did, wid, eid, "Top")
+
+        # Base plate: 50 x 30 x 10 mm on Top
+        rect = SketchBuilder(plane=SketchPlane.TOP, plane_id=top_plane_id, name="Plate")
+        rect.add_rectangle(corner1=(0, 0), corner2=(50 * MM, 30 * MM))
+        rect_r = await apply_feature_and_check(client, did, wid, eid, rect.build())
+        assert rect_r.status == "OK", rect_r.error_message
+
+        ext = ExtrudeBuilder(
+            name="Plate 10mm", sketch_feature_id=rect_r.feature_id,
+            depth=10 * MM, operation_type=ExtrudeType.NEW,
+        )
+        ext_r = await apply_feature_and_check(client, did, wid, eid, ext.build())
+        assert ext_r.status == "OK", ext_r.error_message
+
+        # Render for the before/after diff
+        pre = (await renderer.render_part_studio_views(did, wid, eid, views=["iso"]))[0]
+        pre_bytes = get_image(pre.image_id)
+        ok, _ = _non_blank(pre_bytes)
+        assert ok, "pre-boss render is blank"
+
+        # Discover geometry — the whole point of this test.
+        ent = await entities.list_entities(did, wid, eid, kinds=["faces"])
+        assert ent["bodies"], f"list_entities returned no bodies: {ent!r}"
+        faces = ent["bodies"][0]["faces"]
+        top_candidates = [
+            f for f in faces
+            if f.get("type") == "PLANE" and f.get("normal_axis") == "+Z"
+        ]
+        assert top_candidates, (
+            f"no +Z-normal PLANE face surfaced by list_entities; "
+            f"available: {[(f.get('id'), f.get('type'), f.get('normal_axis')) for f in faces]}"
+        )
+        # Highest-z origin = top face (the one we just extruded up onto).
+        top_face = max(top_candidates, key=lambda f: (f.get("origin") or [0, 0, 0])[2])
+        top_face_id = top_face["id"]
+        assert top_face_id, f"top face missing id: {top_face!r}"
+
+        # Sketch a ø5mm circle on the top face. SketchBuilder reuses plane_id
+        # for the BTMIndividualQuery-138 payload regardless of whether the ID
+        # is a standard plane or a face — that is the one-line unblock.
+        boss_sketch = SketchBuilder(
+            plane=SketchPlane.TOP,  # plane enum is unused by build() when plane_id is set
+            plane_id=top_face_id,
+            name="Boss sketch",
+        )
+        # Centred on the plate (25, 15) mm in the local sketch frame.
+        boss_sketch.add_circle(center=(25 * MM, 15 * MM), radius=2.5 * MM)
+        boss_r = await apply_feature_and_check(client, did, wid, eid, boss_sketch.build())
+        assert boss_r.status == "OK", (
+            f"sketch-on-face status={boss_r.status}; "
+            f"error={boss_r.error_message!r}; face={top_face!r}"
+        )
+
+        # Extrude +3 mm as ADD so it fuses onto the plate.
+        boss_ext = ExtrudeBuilder(
+            name="Boss 3mm", sketch_feature_id=boss_r.feature_id,
+            depth=3 * MM, operation_type=ExtrudeType.ADD,
+        )
+        boss_ext_r = await apply_feature_and_check(client, did, wid, eid, boss_ext.build())
+        assert boss_ext_r.status == "OK", boss_ext_r.error_message
+
+        post = (await renderer.render_part_studio_views(did, wid, eid, views=["iso"]))[0]
+        post_bytes = get_image(post.image_id)
+        ok, _ = _non_blank(post_bytes)
+        assert ok, "post-boss render is blank"
+
+        assert (
+            hashlib.sha256(pre_bytes).hexdigest()
+            != hashlib.sha256(post_bytes).hexdigest()
+        ), "pre- and post-boss renders are byte-identical; boss did not land"
+
+        (TMP / f"e2e-boss-pre-{ts}.png").write_bytes(pre_bytes)
+        (TMP / f"e2e-boss-post-{ts}.png").write_bytes(post_bytes)
+
+    finally:
+        try:
+            await client.delete(f"/api/v10/documents/{did}")
+        except Exception:  # noqa: BLE001
             pass
