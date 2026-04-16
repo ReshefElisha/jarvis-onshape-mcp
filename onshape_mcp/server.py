@@ -4,7 +4,8 @@ import os
 import sys
 import asyncio
 import base64
-from typing import Any
+import json
+from typing import Any, Optional
 import httpx
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -27,6 +28,7 @@ from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
+from .api.feature_apply import apply_feature_and_check, FeatureApplyResult
 from .api.rendering import (
     ShadedViewManager,
     crop_cached_image,
@@ -1196,6 +1198,60 @@ def _format_export_result(result, element_id: str) -> str:
     )
 
 
+def _feature_apply_json(
+    result: FeatureApplyResult,
+    *,
+    tool_name: Optional[str] = None,
+) -> str:
+    """Serialize a FeatureApplyResult as the structured JSON the MCP tool returns.
+
+    All mutating Part Studio tool handlers route their response through this
+    helper so the downstream LLM sees one consistent shape. Fields mirror the
+    helper's result model; `raw` is omitted so the Onshape feature-state dump
+    doesn't balloon the context window. `tool_name` is included so the LLM can
+    tell which call produced a given record when logs get interleaved.
+    """
+    payload: dict[str, Any] = {
+        "ok": result.ok,
+        "status": result.status,
+        "feature_id": result.feature_id,
+        "feature_type": result.feature_type,
+        "feature_name": result.feature_name,
+        "error_message": result.error_message,
+    }
+    if tool_name:
+        payload["tool"] = tool_name
+    return json.dumps(payload, indent=2)
+
+
+def _exception_json(
+    error: BaseException,
+    *,
+    tool_name: Optional[str] = None,
+    status_code: Optional[int] = None,
+) -> str:
+    """Serialize an unexpected exception as the same structured shape.
+
+    Used by mutating-tool handlers so clients never have to branch on whether
+    the response was free text or JSON. `status` is "EXCEPTION" so callers can
+    distinguish an Onshape-reported failure ("ERROR") from a plumbing failure.
+    """
+    msg = str(error)
+    if status_code is not None:
+        msg = f"HTTP {status_code}: {msg}"
+    payload: dict[str, Any] = {
+        "ok": False,
+        "status": "EXCEPTION",
+        "feature_id": "",
+        "feature_type": "",
+        "feature_name": "",
+        "error_message": msg,
+    }
+    if tool_name:
+        payload["tool"] = tool_name
+    return json.dumps(payload, indent=2)
+
+
 def _enrich_rectangular_body(
     planar_faces: list[dict],
 ) -> dict | None:
@@ -1352,11 +1408,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     if name == "create_sketch_rectangle":
         try:
-            # Get the plane name and resolve its ID
             plane_name = arguments.get("plane", "Front")
             plane = SketchPlane[plane_name.upper()]
-
-            # Resolve the plane ID from Onshape
             plane_id = await partstudio_manager.get_plane_id(
                 arguments["documentId"],
                 arguments["workspaceId"],
@@ -1364,11 +1417,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 plane_name,
             )
 
-            # Build sketch with rectangle
             sketch = SketchBuilder(
                 name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id
             )
-
             sketch.add_rectangle(
                 corner1=tuple(arguments["corner1"]),
                 corner2=tuple(arguments["corner2"]),
@@ -1376,30 +1427,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 variable_height=arguments.get("variableHeight"),
             )
 
-            # Add feature to Part Studio
-            feature_data = sketch.build()
-            result = await partstudio_manager.add_feature(
+            result = await apply_feature_and_check(
+                client,
                 arguments["documentId"],
                 arguments["workspaceId"],
                 arguments["elementId"],
-                feature_data,
+                sketch.build(),
             )
-
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created sketch '{arguments.get('name', 'Sketch')}' with rectangle on {plane_name} plane. Feature ID: {feature_id}",
-                )
-            ]
-
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating sketch: {str(e)}\n\nPlease check the document/workspace/element IDs and try again.",
-                )
-            ]
+            logger.exception("Unexpected error creating sketch rectangle")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_extrude":
         try:
@@ -2291,14 +2331,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
                 radius=arguments["radius"],
             )
-            feature_data = sketch.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                sketch.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created sketch with circle on {plane_name} plane. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating sketch circle: {str(e)}")]
+            logger.exception("Unexpected error creating sketch circle")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_sketch_line":
         try:
@@ -2312,14 +2355,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 start=tuple(arguments["startPoint"]),
                 end=tuple(arguments["endPoint"]),
             )
-            feature_data = sketch.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                sketch.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created sketch with line on {plane_name} plane. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating sketch line: {str(e)}")]
+            logger.exception("Unexpected error creating sketch line")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_sketch_arc":
         try:
@@ -2335,14 +2381,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 start_angle=arguments.get("startAngle", 0),
                 end_angle=arguments.get("endAngle", 180),
             )
-            feature_data = sketch.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                sketch.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created sketch with arc on {plane_name} plane. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating sketch arc: {str(e)}")]
+            logger.exception("Unexpected error creating sketch arc")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fillet":
         try:
