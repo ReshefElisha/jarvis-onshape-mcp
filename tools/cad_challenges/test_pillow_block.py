@@ -272,7 +272,11 @@ _top_face_at_z = _top_face  # alias for readability at the bearing-floor call si
 
 
 if __name__ == "__main__":
-    out_root = Path(__file__).resolve().parents[2] / ".." / "scratchpad" / "cad-tests"
+    # /Users/shef/projects/onshape-mcp/scratchpad/cad-tests/, i.e. the
+    # project-root scratchpad, not the starter repo's. Four `..` hops up
+    # from tools/cad_challenges/: challenges -> tools -> starter-repo ->
+    # references -> project-root.
+    out_root = (Path(__file__).resolve().parents[3] / "scratchpad" / "cad-tests")
     report = asyncio.run(run_cad_test(TEST, out_root.resolve()))
     print(report.summary())
     sys.exit(0 if report.ok else 1)
