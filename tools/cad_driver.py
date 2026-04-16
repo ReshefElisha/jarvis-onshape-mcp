@@ -29,6 +29,8 @@ import json
 import os
 import sys
 import time
+
+from loguru import logger
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
@@ -49,6 +51,12 @@ from onshape_mcp.api.describe import DescribeManager  # noqa: E402
 from onshape_mcp.api.documents import DocumentManager  # noqa: E402
 from onshape_mcp.api.partstudio import PartStudioManager  # noqa: E402
 from onshape_mcp.api.rendering import get_image  # noqa: E402
+
+try:
+    from onshape_mcp.critique.gemini_critic import critique_render, CritiqueResult
+    _CRITIC_AVAILABLE = True
+except ImportError:
+    _CRITIC_AVAILABLE = False
 
 
 # --- Step kinds --------------------------------------------------------------
@@ -107,12 +115,43 @@ def assert_state(name: str, predicate: Callable[[Dict[str, Any]], Optional[str]]
     return Step(name=name, fn=_do)
 
 
-def inspect(name: str) -> Step:
-    """Inspect step: render + save per-step snapshot. Always passes."""
+def inspect(name: str, critique: bool = True) -> Step:
+    """Inspect step: render + save per-step snapshot. Always passes.
+
+    When GEMINI_API_KEY is set and `critique=True`, also routes the rendered
+    iso/top views through the Gemini critic against the test's brief. Logs
+    missing/wrong features to stderr and embeds the verdict in the saved
+    snapshot text. Does NOT fail the step on disagreement — the critic can
+    be wrong, and halting on its say-so would be brittle. Surface and move on.
+    """
 
     async def _do(ctx: "DriverContext") -> Optional[str]:
         snap = await ctx.describe()
-        _save_snapshot(ctx, name, snap)
+        verdict_text = ""
+        if critique and _CRITIC_AVAILABLE and os.getenv("GEMINI_API_KEY"):
+            try:
+                images = [get_image(v.image_id) for v in snap["views"]]
+                claimed = list(ctx.feature_ids.keys())
+                result: CritiqueResult = await critique_render(
+                    brief=ctx.brief,
+                    images=images,
+                    claimed_features=claimed,
+                )
+                if result.matches_brief is False:
+                    logger.warning(
+                        f"[{name}] critic DISAGREES: missing={result.missing} "
+                        f"wrong={result.wrong} notes={result.notes!r}"
+                    )
+                elif result.matches_brief is True:
+                    logger.info(f"[{name}] critic approves ({result.notes!r})")
+                verdict_text = (
+                    f"\n\nCRITIC (Gemini): matches_brief={result.matches_brief} "
+                    f"missing={result.missing} wrong={result.wrong}\n"
+                    f"  notes: {result.notes}"
+                )
+            except Exception as e:
+                logger.warning(f"[{name}] critic call failed: {e}")
+        _save_snapshot(ctx, name, snap, extra_text=verdict_text)
         return None
 
     return Step(name=name, fn=_do, halt_on_failure=False)
@@ -129,6 +168,7 @@ class DriverContext:
     eid: str
     out_dir: Path
     describe_mgr: DescribeManager
+    brief: str = ""
     common: Dict[str, str] = field(default_factory=dict)
     feature_ids: Dict[str, str] = field(default_factory=dict)
     step_ix: int = 0
@@ -156,11 +196,13 @@ class DriverContext:
         return self._snapshot_cache
 
 
-def _save_snapshot(ctx: DriverContext, label: str, snap: Dict[str, Any]) -> None:
+def _save_snapshot(
+    ctx: DriverContext, label: str, snap: Dict[str, Any], extra_text: str = ""
+) -> None:
     ctx.out_dir.mkdir(parents=True, exist_ok=True)
     safe = label.replace(" ", "_").replace("/", "-")
     txt_path = ctx.out_dir / f"{ctx.step_ix:02d}_{safe}.txt"
-    txt_path.write_text(snap["text"])
+    txt_path.write_text(snap["text"] + extra_text)
     for v in snap["views"]:
         png_path = ctx.out_dir / f"{ctx.step_ix:02d}_{safe}_{v.view}.png"
         png_path.write_bytes(get_image(v.image_id))
@@ -236,6 +278,7 @@ async def run_cad_test(test: CadTest, out_root: Path) -> TestReport:
         ctx = DriverContext(
             client=client, did=did, wid=wid, eid=eid, out_dir=out_dir,
             describe_mgr=DescribeManager(client),
+            brief=test.brief,
             common={"documentId": did, "workspaceId": wid, "elementId": eid},
         )
         out_dir.mkdir(parents=True, exist_ok=True)
