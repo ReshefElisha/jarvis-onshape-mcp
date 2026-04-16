@@ -1267,6 +1267,7 @@ def _feature_apply_json(
     result: FeatureApplyResult,
     *,
     tool_name: Optional[str] = None,
+    warnings: Optional[list[str]] = None,
 ) -> str:
     """Serialize a FeatureApplyResult as the structured JSON the MCP tool returns.
 
@@ -1274,7 +1275,8 @@ def _feature_apply_json(
     helper so the downstream LLM sees one consistent shape. Fields mirror the
     helper's result model; `raw` is omitted so the Onshape feature-state dump
     doesn't balloon the context window. `tool_name` is included so the LLM can
-    tell which call produced a given record when logs get interleaved.
+    tell which call produced a given record when logs get interleaved. `warnings`
+    is only emitted when non-empty so existing callers see a stable shape.
     """
     payload: dict[str, Any] = {
         "ok": result.ok,
@@ -1286,7 +1288,38 @@ def _feature_apply_json(
     }
     if tool_name:
         payload["tool"] = tool_name
+    if warnings:
+        payload["warnings"] = list(warnings)
     return json.dumps(payload, indent=2)
+
+
+async def _resolve_sketch_plane_id(
+    arguments: dict,
+) -> tuple[str, SketchPlane, list[str]]:
+    """Figure out which deterministic ID to sketch on.
+
+    Returns (plane_id, plane_enum, warnings). `faceId` wins when both are
+    given. When `faceId` is used the enum is set to FRONT as a neutral
+    placeholder — SketchBuilder.build() only consumes `plane_id` for the
+    BTMIndividualQuery-138 parameter.
+    """
+    face_id = arguments.get("faceId")
+    warnings: list[str] = []
+    if face_id:
+        if arguments.get("plane"):
+            warnings.append(
+                "Both `plane` and `faceId` provided; using `faceId`."
+            )
+        return face_id, SketchPlane.FRONT, warnings
+    plane_name = arguments.get("plane", "Front")
+    plane_enum = SketchPlane[plane_name.upper()]
+    plane_id = await partstudio_manager.get_plane_id(
+        arguments["documentId"],
+        arguments["workspaceId"],
+        arguments["elementId"],
+        plane_name,
+    )
+    return plane_id, plane_enum, warnings
 
 
 def _exception_json(
@@ -1473,15 +1506,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     if name == "create_sketch_rectangle":
         try:
-            plane_name = arguments.get("plane", "Front")
-            plane = SketchPlane[plane_name.upper()]
-            plane_id = await partstudio_manager.get_plane_id(
-                arguments["documentId"],
-                arguments["workspaceId"],
-                arguments["elementId"],
-                plane_name,
-            )
-
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(
                 name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id
             )
@@ -1499,7 +1524,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["elementId"],
                 sketch.build(),
             )
-            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
@@ -1683,18 +1708,31 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         try:
             element_type = arguments.get("elementType", "PARTSTUDIO")
             if element_type == "ASSEMBLY":
-                result = await assembly_manager.delete_feature(
+                await assembly_manager.delete_feature(
                     arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
                 )
             else:
-                result = await partstudio_manager.delete_feature(
+                await partstudio_manager.delete_feature(
                     arguments["documentId"], arguments["workspaceId"], arguments["elementId"], arguments["featureId"],
                 )
-            return [TextContent(type="text", text=f"Deleted feature {arguments['featureId']}")]
+            # Delete has no featureStatus to report, but we use the same
+            # contract shape as the mutating handlers so LLM callers don't
+            # have to branch on whether the response is text vs JSON.
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "feature_id": arguments["featureId"],
+                "feature_type": element_type.lower(),
+                "feature_name": "",
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error deleting feature: API returned {e.response.status_code}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error deleting feature: {str(e)}")]
+            logger.exception("Unexpected error deleting feature")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "list_documents":
         try:
@@ -2326,11 +2364,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_sketch_circle":
         try:
-            plane_name = arguments.get("plane", "Front")
-            plane = SketchPlane[plane_name.upper()]
-            plane_id = await partstudio_manager.get_plane_id(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
-            )
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
             sketch.add_circle(
                 center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
@@ -2341,7 +2375,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 sketch.build(),
             )
-            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
@@ -2350,11 +2384,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_sketch_line":
         try:
-            plane_name = arguments.get("plane", "Front")
-            plane = SketchPlane[plane_name.upper()]
-            plane_id = await partstudio_manager.get_plane_id(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
-            )
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
             sketch.add_line(
                 start=tuple(arguments["startPoint"]),
@@ -2365,7 +2395,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 sketch.build(),
             )
-            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
@@ -2374,11 +2404,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_sketch_arc":
         try:
-            plane_name = arguments.get("plane", "Front")
-            plane = SketchPlane[plane_name.upper()]
-            plane_id = await partstudio_manager.get_plane_id(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], plane_name,
-            )
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
             sketch.add_arc(
                 center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
@@ -2391,7 +2417,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 sketch.build(),
             )
-            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
@@ -2546,7 +2572,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 element_id=arguments["elementId"],
                 script=arguments["script"],
             )
-            import json
             return [TextContent(type="text", text=f"FeatureScript result:\n{json.dumps(result, indent=2)}")]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error evaluating FeatureScript: API returned {e.response.status_code}.")]
@@ -2560,7 +2585,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 workspace_id=arguments["workspaceId"],
                 element_id=arguments["elementId"],
             )
-            import json
             return [TextContent(type="text", text=f"Bounding box:\n{json.dumps(result, indent=2)}")]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error getting bounding box: API returned {e.response.status_code}.")]
