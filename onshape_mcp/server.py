@@ -81,7 +81,13 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="create_sketch_rectangle",
-            description="Create a rectangular sketch in a Part Studio with optional variable references",
+            description=(
+                "Create a rectangular sketch in a Part Studio. "
+                "Sketch location: pass either `plane` (standard datum: Front/Top/Right) "
+                "or `faceId` (deterministic ID of a face from `list_entities`). "
+                "Pass `faceId` to sketch on an existing part face; if both are given, "
+                "`faceId` wins and a warning is returned."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -92,8 +98,11 @@ async def list_tools() -> list[Tool]:
                     "plane": {
                         "type": "string",
                         "enum": ["Front", "Top", "Right"],
-                        "description": "Sketch plane",
-                        "default": "Front",
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
                     "corner1": {
                         "type": "array",
@@ -609,7 +618,11 @@ async def list_tools() -> list[Tool]:
         # === Sketch Tools ===
         Tool(
             name="create_sketch_circle",
-            description="Create a circular sketch on a standard plane",
+            description=(
+                "Create a circular sketch. Pass either `plane` (Front/Top/Right) or "
+                "`faceId` (from `list_entities`) to choose the sketch surface. "
+                "`faceId` wins when both are given."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -620,8 +633,11 @@ async def list_tools() -> list[Tool]:
                     "plane": {
                         "type": "string",
                         "enum": ["Front", "Top", "Right"],
-                        "description": "Sketch plane",
-                        "default": "Front",
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
                     "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
                     "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
@@ -632,7 +648,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_sketch_line",
-            description="Create a line sketch on a standard plane",
+            description=(
+                "Create a line sketch. Pass either `plane` (Front/Top/Right) or "
+                "`faceId` (from `list_entities`) to choose the sketch surface. "
+                "`faceId` wins when both are given."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -643,8 +663,11 @@ async def list_tools() -> list[Tool]:
                     "plane": {
                         "type": "string",
                         "enum": ["Front", "Top", "Right"],
-                        "description": "Sketch plane",
-                        "default": "Front",
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
                     "startPoint": {
                         "type": "array",
@@ -666,7 +689,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_sketch_arc",
-            description="Create an arc sketch on a standard plane",
+            description=(
+                "Create an arc sketch. Pass either `plane` (Front/Top/Right) or "
+                "`faceId` (from `list_entities`) to choose the sketch surface. "
+                "`faceId` wins when both are given."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -677,8 +704,11 @@ async def list_tools() -> list[Tool]:
                     "plane": {
                         "type": "string",
                         "enum": ["Front", "Top", "Right"],
-                        "description": "Sketch plane",
-                        "default": "Front",
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
                     "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
                     "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
@@ -1478,131 +1508,71 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_extrude":
         try:
-            # Build extrude
             op_type = ExtrudeType[arguments.get("operationType", "NEW")]
             extrude = ExtrudeBuilder(
                 name=arguments.get("name", "Extrude"),
                 sketch_feature_id=arguments["sketchFeatureId"],
                 operation_type=op_type,
             )
-
             extrude.set_depth(arguments["depth"], variable_name=arguments.get("variableDepth"))
 
-            # Add feature to Part Studio
-            feature_data = extrude.build()
-            result = await partstudio_manager.add_feature(
+            result = await apply_feature_and_check(
+                client,
                 arguments["documentId"],
                 arguments["workspaceId"],
                 arguments["elementId"],
-                feature_data,
+                extrude.build(),
             )
-
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created extrude '{arguments.get('name', 'Extrude')}'. Feature ID: {result.get('feature', {}).get('featureId', result.get('featureId', 'unknown'))}",
-                )
-            ]
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"API error creating extrude: {e.response.status_code} - {e.response.text[:500]}"
-            )
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating extrude: API returned {e.response.status_code}. Check that the sketch feature ID is valid and parameters are correct.",
-                )
-            ]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
-            return [
-                TextContent(
-                    type="text",
-                    text="Error creating extrude: Invalid operation type. Must be one of: NEW, ADD, REMOVE, INTERSECT.",
-                )
-            ]
-        except ValueError as e:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating extrude: {str(e)}",
-                )
-            ]
+            return [TextContent(type="text", text=_exception_json(
+                ValueError("Invalid operationType; must be NEW | ADD | REMOVE | INTERSECT"),
+                tool_name=name,
+            ))]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating extrude: {e.response.status_code} - {e.response.text[:500]}")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating extrude")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating extrude: {str(e)}\n\nPlease check the parameters and try again.",
-                )
-            ]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_thicken":
         try:
-            # Build thicken
             op_type = ThickenType[arguments.get("operationType", "NEW")]
             thicken = ThickenBuilder(
                 name=arguments.get("name", "Thicken"),
                 sketch_feature_id=arguments["sketchFeatureId"],
                 operation_type=op_type,
             )
-
             thicken.set_thickness(
                 arguments["thickness"], variable_name=arguments.get("variableThickness")
             )
-
             if arguments.get("midplane"):
                 thicken.set_midplane(True)
-
             if arguments.get("oppositeDirection"):
                 thicken.set_opposite_direction(True)
 
-            # Add feature to Part Studio
-            feature_data = thicken.build()
-            result = await partstudio_manager.add_feature(
+            # ThickenBuilder returns a bare feature dict; wrap it in {"feature": ...}
+            # so apply_feature_and_check POSTs the expected envelope.
+            result = await apply_feature_and_check(
+                client,
                 arguments["documentId"],
                 arguments["workspaceId"],
                 arguments["elementId"],
-                feature_data,
+                {"feature": thicken.build()},
             )
-
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created thicken '{arguments.get('name', 'Thicken')}'. Feature ID: {result.get('feature', {}).get('featureId', result.get('featureId', 'unknown'))}",
-                )
-            ]
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"API error creating thicken: {e.response.status_code} - {e.response.text[:500]}"
-            )
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating thicken: API returned {e.response.status_code}. Check that the sketch feature ID is valid and parameters are correct.",
-                )
-            ]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
-            return [
-                TextContent(
-                    type="text",
-                    text="Error creating thicken: Invalid operation type. Must be one of: NEW, ADD, REMOVE, INTERSECT.",
-                )
-            ]
-        except ValueError as e:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating thicken: {str(e)}",
-                )
-            ]
+            return [TextContent(type="text", text=_exception_json(
+                ValueError("Invalid operationType; must be NEW | ADD | REMOVE | INTERSECT"),
+                tool_name=name,
+            ))]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API error creating thicken: {e.response.status_code} - {e.response.text[:500]}")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating thicken")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating thicken: {str(e)}\n\nPlease check the parameters and try again.",
-                )
-            ]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "get_variables":
         try:
@@ -2435,16 +2405,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 fillet.add_edge(edge_id)
             if arguments.get("variableRadius"):
                 fillet.set_radius(arguments["radius"], variable_name=arguments["variableRadius"])
-            feature_data = fillet.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                fillet.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created fillet. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating fillet: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating fillet: {str(e)}")]
+            logger.exception("Unexpected error creating fillet")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_chamfer":
         try:
@@ -2454,16 +2425,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 chamfer.add_edge(edge_id)
             if arguments.get("variableDistance"):
                 chamfer.set_distance(arguments["distance"], variable_name=arguments["variableDistance"])
-            feature_data = chamfer.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                chamfer.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created chamfer. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except KeyError:
+            return [TextContent(type="text", text=_exception_json(
+                ValueError("Invalid chamferType; must be EQUAL_OFFSETS | TWO_OFFSETS | OFFSET_ANGLE"),
+                tool_name=name,
+            ))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating chamfer: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating chamfer: {str(e)}")]
+            logger.exception("Unexpected error creating chamfer")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_revolve":
         try:
@@ -2475,16 +2452,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 angle=arguments.get("angle", 360.0),
                 operation_type=op_type,
             )
-            feature_data = revolve.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                revolve.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created revolve. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except KeyError:
+            return [TextContent(type="text", text=_exception_json(
+                ValueError("Invalid operationType; must be NEW | ADD | REMOVE | INTERSECT"),
+                tool_name=name,
+            ))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating revolve: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating revolve: {str(e)}")]
+            logger.exception("Unexpected error creating revolve")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_linear_pattern":
         try:
@@ -2496,16 +2479,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             for fid in arguments["featureIds"]:
                 pattern.add_feature(fid)
             pattern.set_direction(arguments.get("direction", "X"))
-            feature_data = pattern.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                pattern.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created linear pattern. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating pattern: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating pattern: {str(e)}")]
+            logger.exception("Unexpected error creating linear pattern")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_circular_pattern":
         try:
@@ -2517,16 +2501,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             pattern.set_axis(arguments.get("axis", "Z"))
             for fid in arguments["featureIds"]:
                 pattern.add_feature(fid)
-            feature_data = pattern.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                pattern.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created circular pattern. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating pattern: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating pattern: {str(e)}")]
+            logger.exception("Unexpected error creating circular pattern")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_boolean":
         try:
@@ -2536,16 +2521,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 boolean.add_tool_body(body_id)
             for body_id in arguments.get("targetBodyIds", []):
                 boolean.add_target_body(body_id)
-            feature_data = boolean.build()
-            result = await partstudio_manager.add_feature(
-                arguments["documentId"], arguments["workspaceId"], arguments["elementId"], feature_data,
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                boolean.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", result.get("featureId", "unknown"))
-            return [TextContent(type="text", text=f"Created boolean {arguments['booleanType'].lower()}. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except KeyError:
+            return [TextContent(type="text", text=_exception_json(
+                ValueError("Invalid booleanType; must be UNION | SUBTRACT | INTERSECT"),
+                tool_name=name,
+            ))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error creating boolean: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error creating boolean: {str(e)}")]
+            logger.exception("Unexpected error creating boolean")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "eval_featurescript":
         try:
