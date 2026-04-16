@@ -34,6 +34,7 @@ from .api.feature_apply import (
     FeatureApplyResult,
 )
 from .api.entities import EntityManager
+from .api.describe import DescribeManager
 from .api.measurements import MeasurementManager
 from .api.rendering import (
     ShadedViewManager,
@@ -79,6 +80,7 @@ export_manager = ExportManager(client)
 shaded_view_manager = ShadedViewManager(client)
 entity_manager = EntityManager(client)
 measurement_manager = MeasurementManager(client)
+describe_manager = DescribeManager(client)
 
 
 @app.list_tools()
@@ -1284,6 +1286,37 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "0-based body index to limit output. Omit for all bodies.",
                     },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="describe_part_studio",
+            description=(
+                "One-shot snapshot of a Part Studio's entire design state. Returns BOTH a "
+                "structured text representation (feature tree with statuses, body topology "
+                "with every face and edge classified by type + deterministic ID + "
+                "coordinates, bounding box, mass properties) AND the multi-view rendered "
+                "images (iso/top/front/right by default). Use this INSTEAD OF chaining "
+                "get_features + list_entities + render_part_studio_views + get_mass_properties "
+                "after every mutation. The text is what you reason over (reliable for you). "
+                "The images catch visual regressions the text misses. Image_ids returned "
+                "in the text can be cropped via crop_image."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "views": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": ["iso", "top", "front", "right"],
+                        "description": "Named views to render (iso/top/front/back/left/right/bottom).",
+                    },
+                    "renderWidth": {"type": "integer", "default": 1200},
+                    "renderHeight": {"type": "integer", "default": 800},
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
             },
@@ -3257,6 +3290,35 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"list_entities failed: {e}")]
+
+    elif name == "describe_part_studio":
+        try:
+            snap = await describe_manager.describe_part_studio(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                views=arguments.get("views") or None,
+                render_width=int(arguments.get("renderWidth", 1200)),
+                render_height=int(arguments.get("renderHeight", 800)),
+            )
+            out: list[TextContent | ImageContent] = [
+                TextContent(type="text", text=snap.structured_text)
+            ]
+            for r in snap.views:
+                png = get_image(r.image_id)
+                out.append(
+                    ImageContent(
+                        type="image",
+                        data=base64.b64encode(png).decode("ascii"),
+                        mimeType="image/png",
+                    )
+                )
+            return out
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"describe_part_studio failed: HTTP {e.response.status_code}.")]
+        except Exception as e:
+            logger.exception("describe_part_studio failed")
+            return [TextContent(type="text", text=f"describe_part_studio failed: {e}")]
 
     elif name == "measure":
         try:
