@@ -44,10 +44,8 @@ sys.path.insert(0, str(REPO / "tools"))
 from cad_driver import CadTest, Step, build, assert_state, inspect, run_cad_test  # noqa: E402
 
 
-# Starter still interprets bare numbers as INCHES (pending peer's [units] fix).
-# For now, convert mm -> inches inline.
-def mm(x: float) -> float:
-    return x / 25.4
+# After peer's [units] series (commits 97c2633/37ab90f/d95660a), bare numbers
+# are interpreted as millimeters everywhere. Pass bare mm values directly.
 
 
 # --- Helper predicates -------------------------------------------------------
@@ -169,7 +167,7 @@ def _mounting_hole_steps(corner: tuple) -> list[Step]:
         build(sketch_name, "create_sketch_circle", lambda ctx, ix=ix, iy=iy, n=sketch_name: {
             "name": n,
             "faceId": _top_face(ctx, z_mm=8.0),
-            "center": [mm(ix), mm(iy)], "radius": mm(2),
+            "center": [float(ix), float(iy)], "radius": 2,
         }),
         build(cut_name, "create_extrude", lambda ctx, s=sketch_name, n=cut_name: {
             "name": n,
@@ -189,7 +187,7 @@ TEST = CadTest(
         # 1. Base sketch on Top plane, extrude 8mm.
         build("base_sketch", "create_sketch_rectangle", lambda ctx: {
             "name": "base sketch", "plane": "Top",
-            "corner1": [mm(-30), mm(-20)], "corner2": [mm(30), mm(20)],
+            "corner1": [-30, -20], "corner2": [30, 20],
         }),
         build("base_extrude", "create_extrude", lambda ctx: {
             "name": "base extrude",
@@ -203,7 +201,7 @@ TEST = CadTest(
         build("housing_sketch", "create_sketch_circle", lambda ctx: {
             "name": "housing sketch",
             "faceId": _top_face(ctx, z_mm=8.0),
-            "center": [0.0, 0.0], "radius": mm(15),
+            "center": [0.0, 0.0], "radius": 15,
         }),
         build("housing_extrude", "create_extrude", lambda ctx: {
             "name": "housing extrude",
@@ -221,7 +219,7 @@ TEST = CadTest(
         build("bearing_sketch", "create_sketch_circle", lambda ctx: {
             "name": "bearing sketch",
             "faceId": _top_face(ctx, z_mm=28.0),
-            "center": [0.0, 0.0], "radius": mm(11),
+            "center": [0.0, 0.0], "radius": 11,
         }),
         build("bearing_cut", "create_extrude", lambda ctx: {
             "name": "bearing cut",
@@ -236,7 +234,7 @@ TEST = CadTest(
         build("shaft_sketch", "create_sketch_circle", lambda ctx: {
             "name": "shaft sketch",
             "faceId": _top_face_at_z(ctx, z_mm=20.0),  # bearing bore floor at z=28-8=20
-            "center": [0.0, 0.0], "radius": mm(4),
+            "center": [0.0, 0.0], "radius": 4,
         }),
         build("shaft_cut", "create_extrude", lambda ctx: {
             "name": "shaft cut",
