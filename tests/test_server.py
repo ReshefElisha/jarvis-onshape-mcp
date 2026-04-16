@@ -164,16 +164,39 @@ class TestListTools:
             assert "properties" in tool.inputSchema
 
 
+def _mock_apply_result(
+    *,
+    ok: bool = True,
+    status: str = "OK",
+    feature_id: str = "feature123",
+    feature_name: str = "Sketch",
+    feature_type: str = "newSketch",
+    error_message=None,
+):
+    """Build a FeatureApplyResult for use as a mock return value."""
+    from onshape_mcp.api.feature_apply import FeatureApplyResult
+
+    return FeatureApplyResult(
+        ok=ok,
+        status=status,
+        feature_id=feature_id,
+        feature_name=feature_name,
+        feature_type=feature_type,
+        error_message=error_message,
+        raw={},
+    )
+
+
 class TestCreateSketchRectangle:
-    """Test the create_sketch_rectangle tool handler."""
+    """Test the create_sketch_rectangle tool handler (structured-JSON return)."""
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_rectangle_success(self, mock_partstudio):
-        """Test successful sketch rectangle creation."""
+    async def test_create_sketch_rectangle_success(self, mock_partstudio, mock_apply):
         mock_partstudio.get_plane_id = AsyncMock(return_value="plane123")
-        mock_partstudio.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "feature123"}}
+        mock_apply.return_value = _mock_apply_result(
+            feature_id="feature123", feature_name="TestSketch"
         )
 
         arguments = {
@@ -188,84 +211,95 @@ class TestCreateSketchRectangle:
 
         result = await call_tool("create_sketch_rectangle", arguments)
 
-        assert isinstance(result, list)
-        assert len(result) == 1
+        assert isinstance(result, list) and len(result) == 1
         assert isinstance(result[0], TextContent)
-        assert "TestSketch" in result[0].text
-        assert "feature123" in result[0].text
-
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed == {
+            "ok": True,
+            "status": "OK",
+            "feature_id": "feature123",
+            "feature_type": "newSketch",
+            "feature_name": "TestSketch",
+            "error_message": None,
+            "tool": "create_sketch_rectangle",
+        }
         mock_partstudio.get_plane_id.assert_called_once()
-        mock_partstudio.add_feature.assert_called_once()
+        mock_apply.assert_awaited_once()
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_rectangle_with_variables(self, mock_partstudio):
-        """Test sketch creation with variable references."""
+    async def test_create_sketch_rectangle_reports_onshape_error(
+        self, mock_partstudio, mock_apply
+    ):
+        """An Onshape-reported ERROR must surface as ok=false in the JSON."""
         mock_partstudio.get_plane_id = AsyncMock(return_value="plane123")
-        mock_partstudio.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "feature123"}}
+        mock_apply.return_value = _mock_apply_result(
+            ok=False, status="ERROR",
+            feature_id="brokenId",
+            error_message="Sketch is over-defined",
         )
 
+        result = await call_tool("create_sketch_rectangle", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "corner1": [0, 0], "corner2": [1, 1],
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "ERROR"
+        assert "over-defined" in (parsed["error_message"] or "")
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_sketch_rectangle_with_variables(self, mock_partstudio, mock_apply):
+        mock_partstudio.get_plane_id = AsyncMock(return_value="plane123")
+        mock_apply.return_value = _mock_apply_result()
+
         arguments = {
-            "documentId": "doc123",
-            "workspaceId": "workspace123",
-            "elementId": "element123",
-            "corner1": [0, 0],
-            "corner2": [10, 10],
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "corner1": [0, 0], "corner2": [10, 10],
             "variableWidth": "width",
             "variableHeight": "height",
         }
-
         result = await call_tool("create_sketch_rectangle", arguments)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
         assert isinstance(result[0], TextContent)
+        # Builder was given the variable names via sketch.add_rectangle.
+        mock_apply.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_sketch_rectangle_error_handling(self, mock_partstudio):
-        """Test error handling in sketch creation."""
+        """Plumbing failure (get_plane_id raises) yields status=EXCEPTION JSON."""
         mock_partstudio.get_plane_id = AsyncMock(side_effect=Exception("API Error"))
 
-        arguments = {
-            "documentId": "doc123",
-            "workspaceId": "workspace123",
-            "elementId": "element123",
-            "corner1": [0, 0],
-            "corner2": [10, 10],
-        }
-
-        result = await call_tool("create_sketch_rectangle", arguments)
-
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert "Error" in result[0].text
+        result = await call_tool("create_sketch_rectangle", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "corner1": [0, 0], "corner2": [1, 1],
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "API Error" in (parsed["error_message"] or "")
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_rectangle_default_plane(self, mock_partstudio):
-        """Test sketch creation with default plane."""
+    async def test_create_sketch_rectangle_default_plane(self, mock_partstudio, mock_apply):
+        """Missing plane arg defaults to Front."""
         mock_partstudio.get_plane_id = AsyncMock(return_value="plane123")
-        mock_partstudio.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "feature123"}}
-        )
+        mock_apply.return_value = _mock_apply_result()
 
-        arguments = {
-            "documentId": "doc123",
-            "workspaceId": "workspace123",
-            "elementId": "element123",
-            "corner1": [0, 0],
-            "corner2": [10, 10],
-        }
+        await call_tool("create_sketch_rectangle", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "corner1": [0, 0], "corner2": [10, 10],
+        })
 
-        result = await call_tool("create_sketch_rectangle", arguments)
-
-        assert isinstance(result, list)
-        # Should use default "Front" plane
         mock_partstudio.get_plane_id.assert_called_once()
-        call_args = mock_partstudio.get_plane_id.call_args
-        assert call_args[0][3] == "Front"  # plane_name argument
+        assert mock_partstudio.get_plane_id.call_args[0][3] == "Front"
 
 
 class TestCreateExtrude:
@@ -1560,28 +1594,26 @@ class TestFeatureTools:
     """Test feature builder tool handlers."""
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_circle_success(self, mock_ps):
-        """Test creating a sketch circle."""
+    async def test_create_sketch_circle_success(self, mock_ps, mock_apply):
         mock_ps.get_plane_id = AsyncMock(return_value="plane1")
-        mock_ps.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "circ123"}}
-        )
+        mock_apply.return_value = _mock_apply_result(feature_id="circ123")
 
-        arguments = {
+        result = await call_tool("create_sketch_circle", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "radius": 2.0,
-        }
+        })
 
-        result = await call_tool("create_sketch_circle", arguments)
-
-        assert "circle" in result[0].text.lower()
-        assert "circ123" in result[0].text
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_id"] == "circ123"
+        assert parsed["tool"] == "create_sketch_circle"
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_sketch_circle_error(self, mock_ps):
-        """Test sketch circle error."""
         mock_ps.get_plane_id = AsyncMock(side_effect=Exception("fail"))
 
         result = await call_tool("create_sketch_circle", {
@@ -1589,50 +1621,47 @@ class TestFeatureTools:
             "radius": 1.0,
         })
 
-        assert "Error" in result[0].text
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False and parsed["status"] == "EXCEPTION"
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_line_success(self, mock_ps):
-        """Test creating a sketch line."""
+    async def test_create_sketch_line_success(self, mock_ps, mock_apply):
         mock_ps.get_plane_id = AsyncMock(return_value="plane1")
-        mock_ps.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "line123"}}
-        )
+        mock_apply.return_value = _mock_apply_result(feature_id="line123")
 
-        arguments = {
+        result = await call_tool("create_sketch_line", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "startPoint": [0, 0], "endPoint": [10, 10],
-        }
+        })
 
-        result = await call_tool("create_sketch_line", arguments)
-
-        assert "line" in result[0].text.lower()
-        assert "line123" in result[0].text
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_id"] == "line123"
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_sketch_arc_success(self, mock_ps):
-        """Test creating a sketch arc."""
+    async def test_create_sketch_arc_success(self, mock_ps, mock_apply):
         mock_ps.get_plane_id = AsyncMock(return_value="plane1")
-        mock_ps.add_feature = AsyncMock(
-            return_value={"feature": {"featureId": "arc123"}}
-        )
+        mock_apply.return_value = _mock_apply_result(feature_id="arc123")
 
-        arguments = {
+        result = await call_tool("create_sketch_arc", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "radius": 1.5, "startAngle": 0, "endAngle": 90,
-        }
+        })
 
-        result = await call_tool("create_sketch_arc", arguments)
-
-        assert "arc" in result[0].text.lower()
-        assert "arc123" in result[0].text
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_id"] == "arc123"
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_sketch_arc_error(self, mock_ps):
-        """Test sketch arc error."""
         mock_ps.get_plane_id = AsyncMock(side_effect=Exception("fail"))
 
         result = await call_tool("create_sketch_arc", {
@@ -1640,7 +1669,9 @@ class TestFeatureTools:
             "radius": 1.0,
         })
 
-        assert "Error" in result[0].text
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False and parsed["status"] == "EXCEPTION"
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
