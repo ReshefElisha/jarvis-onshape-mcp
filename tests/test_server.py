@@ -1794,6 +1794,60 @@ class TestFeatureTools:
         assert _json.loads(result[0].text)["status"] == "EXCEPTION"
 
 
+class TestDeleteFeature:
+    """Test the delete_feature handler (structured-JSON return)."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_delete_feature_partstudio_success(self, mock_ps):
+        mock_ps.delete_feature = AsyncMock(return_value={})
+        result = await call_tool("delete_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "toDelete",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["status"] == "OK"
+        assert parsed["feature_id"] == "toDelete"
+        assert parsed["feature_type"] == "partstudio"
+        assert parsed["tool"] == "delete_feature"
+        mock_ps.delete_feature.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.assembly_manager")
+    async def test_delete_feature_assembly_success(self, mock_asm):
+        mock_asm.delete_feature = AsyncMock(return_value={})
+        result = await call_tool("delete_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "mateId", "elementType": "ASSEMBLY",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_type"] == "assembly"
+        mock_asm.delete_feature.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_delete_feature_http_error(self, mock_ps):
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "Feature not found"
+        mock_ps.delete_feature = AsyncMock(
+            side_effect=httpx.HTTPStatusError("Not Found", request=Mock(), response=mock_response)
+        )
+        result = await call_tool("delete_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "bogus",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "404" in (parsed["error_message"] or "")
+
+
 class TestFeatureScriptTools:
     """Test FeatureScript tool handlers."""
 
