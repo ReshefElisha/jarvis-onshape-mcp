@@ -513,7 +513,14 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_part_studio",
-            description="Create a new Part Studio in an existing document",
+            description=(
+                "Create a new Part Studio in an existing document. Returns the "
+                "new Part Studio's elementId AND a list of other Part Studios "
+                "in the same workspace (so callers don't accidentally target "
+                "the empty default 'Part Studio 1' that most fresh Onshape "
+                "documents ship with). Prefer this tool's returned elementId "
+                "over re-enumerating via find_part_studios."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -2456,32 +2463,61 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 workspace_id=arguments["workspaceId"],
                 name=arguments["name"],
             )
-
             element_id = result.get("id", "unknown")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created Part Studio '{arguments['name']}'\n"
-                    f"Element ID: {element_id}\n"
-                    f"Use this ID with sketch and feature commands.",
+
+            # Enumerate every PartStudio now in the workspace and report
+            # those OTHER than the one we just created. Most new Onshape
+            # documents ship with an empty default "Part Studio 1"; a caller
+            # that later uses find_part_studios or get_elements can pick the
+            # empty default by accident and render nothing. Returning the
+            # list up-front lets the caller either target the new id we
+            # surface or clean up the default explicitly.
+            other_part_studios: list[dict[str, str]] = []
+            try:
+                elements = await document_manager.find_part_studios(
+                    arguments["documentId"], arguments["workspaceId"],
                 )
-            ]
+                other_part_studios = [
+                    {"id": e.id, "name": e.name}
+                    for e in elements
+                    if e.id and e.id != element_id
+                ]
+            except Exception as enum_err:  # noqa: BLE001
+                logger.warning(
+                    f"create_part_studio: failed to enumerate siblings: {enum_err}"
+                )
+
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "element_id": element_id,
+                "element_name": arguments["name"],
+                "other_part_studios": other_part_studios,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating Part Studio: {e.response.status_code}")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating Part Studio: API returned {e.response.status_code}. Check the document/workspace IDs.",
-                )
-            ]
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": "",
+                "element_name": arguments.get("name", ""),
+                "other_part_studios": [],
+                "error_message": f"HTTP {e.response.status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
         except Exception as e:
             logger.exception("Unexpected error creating Part Studio")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error creating Part Studio: {str(e)}",
-                )
-            ]
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": "",
+                "element_name": arguments.get("name", ""),
+                "other_part_studios": [],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
 
     elif name == "create_assembly":
         try:

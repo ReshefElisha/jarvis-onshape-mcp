@@ -957,34 +957,92 @@ class TestCreateDocumentTool:
 
 
 class TestCreatePartStudioTool:
-    """Test create_part_studio tool handler."""
+    """Test create_part_studio tool handler (structured JSON + sibling list)."""
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
     @patch("onshape_mcp.server.partstudio_manager")
-    async def test_create_part_studio_success(self, mock_partstudio):
-        """Test successful Part Studio creation via tool."""
+    async def test_create_part_studio_success(self, mock_partstudio, mock_docs):
+        """Response includes the new element id plus any sibling Part Studios."""
+        from onshape_mcp.api.documents import ElementInfo
+
         mock_partstudio.create_part_studio = AsyncMock(
             return_value={"id": "new_ps_123", "name": "My Part Studio"}
         )
+        # Workspace has the default empty PS plus the one we just created.
+        mock_docs.find_part_studios = AsyncMock(
+            return_value=[
+                ElementInfo(id="default_ps", name="Part Studio 1", elementType="PARTSTUDIO"),
+                ElementInfo(id="new_ps_123", name="My Part Studio", elementType="PARTSTUDIO"),
+            ]
+        )
 
-        arguments = {
+        result = await call_tool("create_part_studio", {
             "documentId": "doc123",
             "workspaceId": "ws123",
             "name": "My Part Studio",
-        }
+        })
 
-        result = await call_tool("create_part_studio", arguments)
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["status"] == "OK"
+        assert parsed["element_id"] == "new_ps_123"
+        assert parsed["element_name"] == "My Part Studio"
+        # Sibling list excludes the newly-created element, surfaces the default.
+        siblings = {(p["id"], p["name"]) for p in parsed["other_part_studios"]}
+        assert siblings == {("default_ps", "Part Studio 1")}
+        assert parsed["tool"] == "create_part_studio"
 
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert isinstance(result[0], TextContent)
-        assert "My Part Studio" in result[0].text
-        assert "new_ps_123" in result[0].text
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_part_studio_no_siblings(self, mock_partstudio, mock_docs):
+        """Fresh doc where the new PS is the only one — other_part_studios is []."""
+        from onshape_mcp.api.documents import ElementInfo
+
+        mock_partstudio.create_part_studio = AsyncMock(
+            return_value={"id": "ps_alone", "name": "Solo"}
+        )
+        mock_docs.find_part_studios = AsyncMock(
+            return_value=[
+                ElementInfo(id="ps_alone", name="Solo", elementType="PARTSTUDIO"),
+            ]
+        )
+
+        result = await call_tool("create_part_studio", {
+            "documentId": "d", "workspaceId": "w", "name": "Solo",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["other_part_studios"] == []
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_part_studio_survives_sibling_enum_failure(
+        self, mock_partstudio, mock_docs
+    ):
+        """If find_part_studios blows up, the tool still returns ok=true."""
+        mock_partstudio.create_part_studio = AsyncMock(
+            return_value={"id": "new_id", "name": "X"}
+        )
+        mock_docs.find_part_studios = AsyncMock(side_effect=Exception("network"))
+
+        result = await call_tool("create_part_studio", {
+            "documentId": "d", "workspaceId": "w", "name": "X",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["element_id"] == "new_id"
+        assert parsed["other_part_studios"] == []
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_part_studio_http_error(self, mock_partstudio):
-        """Test Part Studio creation with HTTP error."""
+        """HTTP failure during create_part_studio surfaces as structured EXCEPTION."""
         mock_response = Mock()
         mock_response.status_code = 404
         mock_response.text = "Document not found"
@@ -994,36 +1052,32 @@ class TestCreatePartStudioTool:
             )
         )
 
-        arguments = {
+        result = await call_tool("create_part_studio", {
             "documentId": "invalid_doc",
             "workspaceId": "ws123",
             "name": "Part Studio",
-        }
-
-        result = await call_tool("create_part_studio", arguments)
-
-        assert isinstance(result, list)
-        assert "Error" in result[0].text
-        assert "404" in result[0].text
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "404" in (parsed["error_message"] or "")
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_part_studio_generic_error(self, mock_partstudio):
-        """Test Part Studio creation with generic error."""
         mock_partstudio.create_part_studio = AsyncMock(
             side_effect=Exception("Unexpected error")
         )
 
-        arguments = {
-            "documentId": "doc123",
-            "workspaceId": "ws123",
-            "name": "Part Studio",
-        }
-
-        result = await call_tool("create_part_studio", arguments)
-
-        assert isinstance(result, list)
-        assert "Error" in result[0].text
+        result = await call_tool("create_part_studio", {
+            "documentId": "d", "workspaceId": "w", "name": "PS",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "Unexpected error" in (parsed["error_message"] or "")
 
 
 class TestAssemblyTools:
