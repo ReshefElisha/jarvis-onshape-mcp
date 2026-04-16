@@ -1747,7 +1747,7 @@ class TestFeatureTools:
         result = await call_tool("create_linear_pattern", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
             "distance": 2.0, "count": 5, "featureIds": ["f1"],
-            "direction": "X",
+            "directionEdgeId": "EDGE1",
         })
         import json as _json
         parsed = _json.loads(result[0].text)

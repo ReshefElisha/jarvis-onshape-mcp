@@ -22,6 +22,7 @@ class LinearPatternBuilder:
         name: str = "Linear pattern",
         distance: Union[float, int, str] = 1.0,
         count: int = 2,
+        direction_edge_id: Optional[str] = None,
     ):
         """Initialize linear pattern builder.
 
@@ -29,13 +30,20 @@ class LinearPatternBuilder:
             name: Name of the pattern feature
             distance: Spacing between instances. Bare numbers default to mm.
             count: Total number of instances including the original
+            direction_edge_id: Deterministic id of an edge whose direction
+                defines the pattern axis. Get from list_entities(kinds=["edges"])
+                or from a sketch line you drew specifically as a direction
+                reference. REQUIRED for the pattern to build: Onshape has no
+                implicit "world X" axis usable via qCreatedBy() on a datum
+                plane, so the caller MUST pick an edge.
         """
         self.name = name
         self.distance: Union[float, int, str] = distance
         self.count = count
         self.distance_variable: Optional[str] = None
         self.feature_queries: List[str] = []
-        self.direction_axis = "X"
+        self.direction_axis = "X"  # legacy field kept for caller-compat
+        self.direction_edge_id: Optional[str] = direction_edge_id
 
     def set_distance(
         self,
@@ -81,38 +89,51 @@ class LinearPatternBuilder:
         return self
 
     def set_direction(self, axis: str) -> "LinearPatternBuilder":
-        """Set the pattern direction axis.
+        """LEGACY: axis name. Prefer set_direction_edge with a real edge id.
 
-        Args:
-            axis: Direction axis ("X", "Y", or "Z")
-
-        Returns:
-            Self for chaining
+        Kept for callers that still pass axis=X/Y/Z. On its own, axis=X/Y/Z
+        will produce an ERROR-state pattern feature because Onshape's
+        datum planes (Right/Top/Front) don't carry EDGE entities. Pair it
+        with set_direction_edge() or pass `direction_edge_id` in __init__.
         """
         self.direction_axis = axis
         return self
 
-    def _build_direction_query(self) -> Dict[str, Any]:
-        """Build the direction axis query parameter.
+    def set_direction_edge(self, edge_id: str) -> "LinearPatternBuilder":
+        """Set the pattern direction via an edge's deterministic ID.
 
-        Returns:
-            Direction query parameter dictionary
+        Get the edge id from list_entities(kinds=["edges"]) — pick any line
+        edge pointing the direction you want the pattern to propagate in.
         """
-        axis_map = {
-            "X": "RIGHT",
-            "Y": "TOP",
-            "Z": "FRONT",
-        }
-        axis_value = axis_map.get(self.direction_axis, "RIGHT")
+        self.direction_edge_id = edge_id
+        return self
+
+    def _build_direction_query(self) -> Dict[str, Any]:
+        """Build the direction-edge query parameter.
+
+        The pattern won't regenerate without a real edge to follow. Callers
+        MUST have set a direction_edge_id (either via __init__ or
+        set_direction_edge()). We intentionally do NOT fall back to the old
+        axis=X/Y/Z datum-plane path — it always failed silently in the
+        builder's mock tests and loud-ERRORed at the API layer. See
+        tools/cad_challenges/test_linear_pattern_holes.py regression marker.
+        """
+        if not self.direction_edge_id:
+            raise ValueError(
+                "LinearPatternBuilder needs a direction_edge_id. Call "
+                "list_entities(kinds=['edges']) and pick an edge pointing "
+                "the direction you want the pattern to propagate; pass its "
+                "id as direction_edge_id."
+            )
 
         return {
             "btType": "BTMParameterQueryList-148",
             "queries": [
                 {
                     "btType": "BTMIndividualQuery-138",
-                    "deterministicIds": [],
+                    "deterministicIds": [self.direction_edge_id],
                     "queryStatement": None,
-                    "queryString": f'query = qCreatedBy(makeId("{axis_value}"), EntityType.EDGE);',
+                    "queryString": "",
                 }
             ],
             "parameterId": "directionQuery",
