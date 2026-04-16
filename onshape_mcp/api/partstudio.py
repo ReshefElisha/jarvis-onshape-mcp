@@ -1,6 +1,7 @@
 """Part Studio management for Onshape."""
 
 from typing import Any, Dict, List
+from urllib.parse import quote
 from .client import OnshapeClient
 
 
@@ -69,9 +70,10 @@ class PartStudioManager:
         Returns:
             API response
         """
+        encoded_fid = quote(feature_id, safe="")
         path = (
             f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}"
-            f"/features/featureid/{feature_id}"
+            f"/features/featureid/{encoded_fid}"
         )
         return await self.client.post(path, data=feature_data)
 
@@ -89,9 +91,10 @@ class PartStudioManager:
         Returns:
             API response
         """
+        encoded_fid = quote(feature_id, safe="")
         path = (
             f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}"
-            f"/features/featureid/{feature_id}"
+            f"/features/featureid/{encoded_fid}"
         )
         return await self.client.delete(path)
 
