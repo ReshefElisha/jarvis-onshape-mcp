@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from .client import OnshapeClient
 
 
-FeatureStatus = Literal["OK", "WARNING", "ERROR", "UNKNOWN"]
+FeatureStatus = Literal["OK", "INFO", "WARNING", "ERROR", "UNKNOWN"]
 
 
 class FeatureApplyResult(BaseModel):
@@ -113,8 +113,14 @@ async def apply_feature_and_check(
             state = None
 
     raw_status: str = (state or {}).get("featureStatus", "UNKNOWN")
-    status: FeatureStatus = raw_status if raw_status in ("OK", "WARNING", "ERROR") else "UNKNOWN"
-    ok = status == "OK"
+    status: FeatureStatus = (
+        raw_status if raw_status in ("OK", "INFO", "WARNING", "ERROR") else "UNKNOWN"
+    )
+    # INFO means Onshape auto-adjusted something (e.g. extrude depth clamped to
+    # through-all), but the feature built correctly and downstream geometry is
+    # valid. Treat it as success; error_message still gets populated below so
+    # Claude can learn from the note.
+    ok = status in ("OK", "INFO")
 
     error_message: Optional[str] = None
     if status != "OK":
