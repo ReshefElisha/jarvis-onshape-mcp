@@ -118,6 +118,40 @@ class OnshapeClient:
         logger.debug(f"GET {url} response: {self._sanitize_for_logging(result, max_length=500)}")
         return result
 
+    async def get_raw(
+        self,
+        path: str,
+        params: Optional[Dict[str, Any]] = None,
+        follow_redirects: bool = True,
+    ) -> bytes:
+        """Make a GET request that returns the raw response body.
+
+        Used for binary payloads such as translation downloads and thumbnails
+        where the response is not JSON.
+
+        Args:
+            path: API endpoint path
+            params: Query parameters
+            follow_redirects: Whether to follow 302s (Onshape often redirects
+                external-data downloads to a signed URL)
+
+        Returns:
+            Raw response bytes
+        """
+        url = f"{self.base_url}{path}"
+        headers = {
+            "Authorization": self._get_auth_header(),
+        }
+
+        self._ensure_client()
+        logger.debug(f"GET (raw) {url} with params: {self._sanitize_for_logging(params)}")
+        response = await self._client.get(
+            url, params=params, headers=headers, follow_redirects=follow_redirects
+        )
+        response.raise_for_status()
+        logger.debug(f"GET (raw) {url} returned {len(response.content)} bytes")
+        return response.content
+
     async def post(
         self,
         path: str,
