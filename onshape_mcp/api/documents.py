@@ -314,9 +314,9 @@ class DocumentManager:
     async def delete_document(self, document_id: str) -> Dict[str, Any]:
         """Delete (trash) a document.
 
-        Onshape treats document deletion as moving to the user's trash; the
-        operation is DELETE /api/v10/documents/{did}. Non-empty responses are
-        rare here, but we return whatever the API gives us.
+        Onshape treats document deletion as moving to the user's trash. We use
+        the v6 path; v10 returns 403 for standard tokens (it's reserved for
+        microversion-aware deletion).
 
         Args:
             document_id: Document ID
@@ -324,7 +324,7 @@ class DocumentManager:
         Returns:
             Raw API response (often empty on success).
         """
-        return await self.client.delete(f"/api/v10/documents/{document_id}")
+        return await self.client.delete(f"/api/v6/documents/{document_id}")
 
     async def get_document_summary(self, document_id: str) -> Dict[str, Any]:
         """Get a comprehensive summary of a document including workspaces and elements.
