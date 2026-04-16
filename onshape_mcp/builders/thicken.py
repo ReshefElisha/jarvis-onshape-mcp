@@ -1,7 +1,9 @@
 """Thicken feature builder for Onshape."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from enum import Enum
+
+from ._units import parse_length
 
 
 class ThickenType(Enum):
@@ -29,18 +31,21 @@ class ThickenBuilder:
         self.name = name
         self.sketch_feature_id = sketch_feature_id
         self.operation_type = operation_type
-        self.thickness_value: Optional[float] = None
+        self.thickness_value: Optional[Union[float, int, str]] = None
         self.thickness_variable: Optional[str] = None
         self.midplane = False
         self.opposite_direction = False
 
     def set_thickness(
-        self, thickness: float, variable_name: Optional[str] = None
+        self,
+        thickness: Union[float, int, str],
+        variable_name: Optional[str] = None,
     ) -> "ThickenBuilder":
         """Set the thickness for the thicken operation.
 
         Args:
-            thickness: Thickness value in inches
+            thickness: Thickness. Bare numbers default to mm; strings like
+                "0.25 in" or "6 mm" carry explicit units.
             variable_name: Optional variable name to use for thickness
 
         Returns:
@@ -86,11 +91,13 @@ class ThickenBuilder:
         if self.thickness_value is None and self.thickness_variable is None:
             raise ValueError("Thickness must be set")
 
-        # Determine thickness expression
+        # Determine thickness expression (and a matching numeric meter value
+        # for the `value` field; Onshape prefers a stale-cleared 0 when the
+        # expression is a variable reference so the solver re-evaluates).
         if self.thickness_variable:
             thickness_expr = f"#{self.thickness_variable}"
         else:
-            thickness_expr = f"{self.thickness_value} in"
+            thickness_expr = parse_length(self.thickness_value).expression
 
         # Build the feature data
         feature = {
@@ -137,7 +144,7 @@ class ThickenBuilder:
                 },
                 {
                     "btType": "BTMParameterQuantity-147",
-                    "expression": "0 in",
+                    "expression": "0 mm",
                     "parameterId": "thickness2",
                 },
             ],

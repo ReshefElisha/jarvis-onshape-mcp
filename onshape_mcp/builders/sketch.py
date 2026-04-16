@@ -1,8 +1,21 @@
 """Sketch feature builder for Onshape."""
 
 import math
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Union
 from enum import Enum
+
+from ._units import parse_length
+
+
+# A sketch-space length: raw number (interpreted as mm, the new default), or a
+# string with an explicit unit ("10 mm", "0.5 in"). All sketch geometry
+# coordinates and radii accept this type.
+LengthLike = Union[float, int, str]
+
+
+def _to_meters(v: LengthLike) -> float:
+    """Parse a user-facing length value to meters."""
+    return parse_length(v).meters
 
 
 class SketchPlane(Enum):
@@ -50,8 +63,8 @@ class SketchBuilder:
 
     def add_rectangle(
         self,
-        corner1: Tuple[float, float],
-        corner2: Tuple[float, float],
+        corner1: Tuple[LengthLike, LengthLike],
+        corner2: Tuple[LengthLike, LengthLike],
         variable_width: Optional[str] = None,
         variable_height: Optional[str] = None,
     ) -> "SketchBuilder":
@@ -61,8 +74,9 @@ class SketchBuilder:
         parallel, coincident, horizontal, and optional dimensional constraints).
 
         Args:
-            corner1: First corner (x, y) in inches
-            corner2: Opposite corner (x, y) in inches
+            corner1: First corner `(x, y)`. Each component is a number (mm
+                default) or a string with an explicit unit ("10 mm", "0.5 in").
+            corner2: Opposite corner `(x, y)`, same convention.
             variable_width: Optional variable name for width
             variable_height: Optional variable name for height
 
@@ -72,12 +86,8 @@ class SketchBuilder:
         x1, y1 = corner1
         x2, y2 = corner2
 
-        # Convert inches to meters for Onshape API
-        def to_meters(inches: float) -> float:
-            return inches * 0.0254
-
-        x1_m, y1_m = to_meters(x1), to_meters(y1)
-        x2_m, y2_m = to_meters(x2), to_meters(y2)
+        x1_m, y1_m = _to_meters(x1), _to_meters(y1)
+        x2_m, y2_m = _to_meters(x2), _to_meters(y2)
 
         # Generate unique IDs for all components
         rect_id = self._generate_entity_id("rect")
@@ -361,27 +371,23 @@ class SketchBuilder:
 
     def add_circle(
         self,
-        center: Tuple[float, float],
-        radius: float,
+        center: Tuple[LengthLike, LengthLike],
+        radius: LengthLike,
         is_construction: bool = False,
     ) -> "SketchBuilder":
         """Add a circle to the sketch.
 
         Args:
-            center: Center point (x, y) in inches
-            radius: Radius in inches
+            center: Center point `(x, y)` (number = mm, or "10 mm" / "0.5 in")
+            radius: Radius (number = mm, or string with explicit unit)
             is_construction: Whether this is construction geometry
 
         Returns:
             Self for chaining
         """
         cx, cy = center
-
-        def to_meters(inches: float) -> float:
-            return inches * 0.0254
-
-        cx_m, cy_m = to_meters(cx), to_meters(cy)
-        radius_m = to_meters(radius)
+        cx_m, cy_m = _to_meters(cx), _to_meters(cy)
+        radius_m = _to_meters(radius)
 
         circle_id = self._generate_entity_id("circle")
 
@@ -481,8 +487,8 @@ class SketchBuilder:
 
     def add_arc(
         self,
-        center: Tuple[float, float],
-        radius: float,
+        center: Tuple[LengthLike, LengthLike],
+        radius: LengthLike,
         start_angle: float = 0.0,
         end_angle: float = 180.0,
         is_construction: bool = False,
@@ -490,8 +496,8 @@ class SketchBuilder:
         """Add an arc to the sketch.
 
         Args:
-            center: Center point (x, y) in inches
-            radius: Radius in inches
+            center: Center point `(x, y)` (number = mm, or string with unit)
+            radius: Radius (number = mm, or string with unit)
             start_angle: Start angle in degrees (0 = positive X direction)
             end_angle: End angle in degrees
             is_construction: Whether this is construction geometry
@@ -500,12 +506,8 @@ class SketchBuilder:
             Self for chaining
         """
         cx, cy = center
-
-        def to_meters(inches: float) -> float:
-            return inches * 0.0254
-
-        cx_m, cy_m = to_meters(cx), to_meters(cy)
-        radius_m = to_meters(radius)
+        cx_m, cy_m = _to_meters(cx), _to_meters(cy)
+        radius_m = _to_meters(radius)
 
         start_rad = math.radians(start_angle)
         end_rad = math.radians(end_angle)
@@ -538,15 +540,15 @@ class SketchBuilder:
 
     def add_line(
         self,
-        start: Tuple[float, float],
-        end: Tuple[float, float],
+        start: Tuple[LengthLike, LengthLike],
+        end: Tuple[LengthLike, LengthLike],
         is_construction: bool = False,
     ) -> "SketchBuilder":
         """Add a line segment to the sketch.
 
         Args:
-            start: Start point (x, y) in inches
-            end: End point (x, y) in inches
+            start: Start point `(x, y)` (number = mm, or string with unit)
+            end: End point `(x, y)` (number = mm, or string with unit)
             is_construction: Whether this is construction geometry
 
         Returns:
@@ -555,11 +557,8 @@ class SketchBuilder:
         sx, sy = start
         ex, ey = end
 
-        def to_meters(inches: float) -> float:
-            return inches * 0.0254
-
-        sx_m, sy_m = to_meters(sx), to_meters(sy)
-        ex_m, ey_m = to_meters(ex), to_meters(ey)
+        sx_m, sy_m = _to_meters(sx), _to_meters(sy)
+        ex_m, ey_m = _to_meters(ex), _to_meters(ey)
 
         length = math.sqrt((ex_m - sx_m) ** 2 + (ey_m - sy_m) ** 2)
         if length == 0:
@@ -593,9 +592,9 @@ class SketchBuilder:
 
     def add_polygon(
         self,
-        center: Tuple[float, float],
+        center: Tuple[LengthLike, LengthLike],
         sides: int,
-        radius: float,
+        radius: LengthLike,
         is_construction: bool = False,
     ) -> "SketchBuilder":
         """Add a regular polygon to the sketch.
@@ -603,9 +602,9 @@ class SketchBuilder:
         Creates a polygon inscribed in a circle of the given radius.
 
         Args:
-            center: Center point (x, y) in inches
+            center: Center point `(x, y)` (number = mm, or string with unit)
             sides: Number of sides (3 for triangle, 6 for hexagon, etc.)
-            radius: Circumscribed radius in inches
+            radius: Circumscribed radius (number = mm, or string with unit)
             is_construction: Whether this is construction geometry
 
         Returns:
@@ -617,21 +616,32 @@ class SketchBuilder:
         if sides < 3:
             raise ValueError("Polygon must have at least 3 sides")
 
-        cx, cy = center
+        # Parse once, in meters, then compute vertices in meters. Pass the
+        # already-meter vertices to add_line as numeric (treated as mm by
+        # add_line's parser -> convert back to meters). To avoid the mm
+        # re-parse, we bypass add_line's coordinate parsing by constructing
+        # geometry with meters directly -- simplest is to pass explicit "m"
+        # strings so parse_length recognizes them.
+        cx_m, cy_m = _to_meters(center[0]), _to_meters(center[1])
+        radius_m = _to_meters(radius)
 
-        # Calculate vertices
-        vertices = []
+        vertices: List[Tuple[float, float]] = []
         for i in range(sides):
             angle = 2.0 * math.pi * i / sides - math.pi / 2  # Start from top
-            vx = cx + radius * math.cos(angle)
-            vy = cy + radius * math.sin(angle)
+            vx = cx_m + radius_m * math.cos(angle)
+            vy = cy_m + radius_m * math.sin(angle)
             vertices.append((vx, vy))
 
-        # Add line segments between consecutive vertices
         for i in range(sides):
-            start = vertices[i]
-            end = vertices[(i + 1) % sides]
-            self.add_line(start, end, is_construction=is_construction)
+            sx, sy = vertices[i]
+            ex, ey = vertices[(i + 1) % sides]
+            # add_line treats bare numbers as mm; we already have meters, so
+            # pass explicit-meter strings.
+            self.add_line(
+                (f"{sx} m", f"{sy} m"),
+                (f"{ex} m", f"{ey} m"),
+                is_construction=is_construction,
+            )
 
         return self
 

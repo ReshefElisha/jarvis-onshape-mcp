@@ -71,16 +71,29 @@ class TestFilletBuilder:
         assert entities["queries"][0]["deterministicIds"] == ["edge1", "edge2"]
 
     def test_build_radius_without_variable(self):
+        """Bare numbers default to mm; value is meters."""
         fillet = FilletBuilder(radius=0.5)
         fillet.add_edge("edge1")
         result = fillet.build()
         params = result["feature"]["parameters"]
 
         radius_param = next(p for p in params if p["parameterId"] == "radius")
-        assert radius_param["expression"] == "0.5 in"
-        assert radius_param["value"] == 0.5
+        assert radius_param["expression"] == "0.5 mm"
+        # 0.5 mm = 0.0005 m
+        assert radius_param["value"] == pytest.approx(0.0005)
+
+    def test_build_radius_with_unit_string(self):
+        fillet = FilletBuilder(radius="2 mm")
+        fillet.add_edge("edge1")
+        result = fillet.build()
+        radius_param = next(
+            p for p in result["feature"]["parameters"] if p["parameterId"] == "radius"
+        )
+        assert radius_param["expression"] == "2 mm"
+        assert radius_param["value"] == pytest.approx(0.002)
 
     def test_build_radius_with_variable(self):
+        """Variable refs zero out the numeric value."""
         fillet = FilletBuilder()
         fillet.set_radius(0.25, variable_name="r")
         fillet.add_edge("edge1")
@@ -89,7 +102,7 @@ class TestFilletBuilder:
 
         radius_param = next(p for p in params if p["parameterId"] == "radius")
         assert radius_param["expression"] == "#r"
-        assert radius_param["value"] == 0.25
+        assert radius_param["value"] == 0.0
 
     def test_method_chaining(self):
         fillet = (

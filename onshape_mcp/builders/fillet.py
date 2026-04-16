@@ -1,6 +1,8 @@
 """Fillet feature builder for Onshape."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from ._units import parse_length
 
 
 class FilletBuilder:
@@ -9,24 +11,30 @@ class FilletBuilder:
     def __init__(
         self,
         name: str = "Fillet",
-        radius: float = 0.1,
+        radius: Union[float, int, str] = 0.1,
     ):
         """Initialize fillet builder.
 
         Args:
             name: Name of the fillet feature
-            radius: Fillet radius in inches
+            radius: Fillet radius. Bare numbers default to mm; strings like
+                "0.125 in" or "2 mm" carry explicit units.
         """
         self.name = name
-        self.radius = radius
+        self.radius: Union[float, int, str] = radius
         self.radius_variable: Optional[str] = None
         self.edge_queries: List[str] = []
 
-    def set_radius(self, radius: float, variable_name: Optional[str] = None) -> "FilletBuilder":
+    def set_radius(
+        self,
+        radius: Union[float, int, str],
+        variable_name: Optional[str] = None,
+    ) -> "FilletBuilder":
         """Set fillet radius.
 
         Args:
-            radius: Radius in inches
+            radius: Radius. Bare numbers are mm; pass a "<value> <unit>" string
+                for explicit units.
             variable_name: Optional variable name to reference
 
         Returns:
@@ -60,9 +68,13 @@ class FilletBuilder:
         if not self.edge_queries:
             raise ValueError("At least one edge must be added")
 
-        radius_expression = (
-            f"#{self.radius_variable}" if self.radius_variable else f"{self.radius} in"
-        )
+        if self.radius_variable:
+            radius_expression = f"#{self.radius_variable}"
+            radius_value_m = 0.0
+        else:
+            parsed = parse_length(self.radius)
+            radius_expression = parsed.expression
+            radius_value_m = parsed.meters
 
         return {
             "btType": "BTFeatureDefinitionCall-1406",
@@ -88,7 +100,7 @@ class FilletBuilder:
                     {
                         "btType": "BTMParameterQuantity-147",
                         "isInteger": False,
-                        "value": self.radius,
+                        "value": radius_value_m,
                         "units": "",
                         "expression": radius_expression,
                         "parameterId": "radius",

@@ -157,7 +157,7 @@ class TestExtrudeBuilder:
         assert op_param["value"] == "ADD"
 
     def test_build_depth_parameter_without_variable(self):
-        """Test depth parameter when no variable is set."""
+        """Bare numbers default to mm; value is meters."""
         extrude = ExtrudeBuilder(sketch_feature_id="sketch1", depth=3.5)
 
         result = extrude.build()
@@ -166,12 +166,24 @@ class TestExtrudeBuilder:
         depth_param = next(p for p in parameters if p["parameterId"] == "depth")
 
         assert depth_param["btType"] == "BTMParameterQuantity-147"
-        assert depth_param["expression"] == "3.5 in"
-        assert depth_param["value"] == 3.5
+        assert depth_param["expression"] == "3.5 mm"
+        # 3.5 mm = 0.0035 m
+        assert depth_param["value"] == pytest.approx(0.0035)
         assert depth_param["isInteger"] is False
 
+    def test_build_depth_parameter_with_explicit_unit_string(self):
+        """Explicit-unit strings round-trip through the expression."""
+        extrude = ExtrudeBuilder(sketch_feature_id="sketch1", depth="1.5 in")
+
+        result = extrude.build()
+        depth_param = next(
+            p for p in result["feature"]["parameters"] if p["parameterId"] == "depth"
+        )
+        assert depth_param["expression"] == "1.5 in"
+        assert depth_param["value"] == pytest.approx(1.5 * 0.0254)
+
     def test_build_depth_parameter_with_variable(self):
-        """Test depth parameter when variable is set."""
+        """Variable refs leave `value` zeroed so Onshape re-evaluates."""
         extrude = ExtrudeBuilder(sketch_feature_id="sketch1")
         extrude.set_depth(2.0, variable_name="part_depth")
 
@@ -181,7 +193,7 @@ class TestExtrudeBuilder:
         depth_param = next(p for p in parameters if p["parameterId"] == "depth")
 
         assert depth_param["expression"] == "#part_depth"
-        assert depth_param["value"] == 2.0
+        assert depth_param["value"] == 0.0
 
     def test_build_includes_opposite_direction_parameter(self):
         """Test that build() includes oppositeDirection parameter."""
@@ -243,7 +255,7 @@ class TestExtrudeBuilder:
         assert depth_param["value"] == 0
 
     def test_negative_depth(self):
-        """Test handling negative depth."""
+        """Negative depth in mm (default) -> negative meter value."""
         extrude = ExtrudeBuilder(sketch_feature_id="sketch1", depth=-5.0)
 
         result = extrude.build()
@@ -251,4 +263,6 @@ class TestExtrudeBuilder:
 
         depth_param = next(p for p in parameters if p["parameterId"] == "depth")
 
-        assert depth_param["value"] == -5.0
+        # -5 mm = -0.005 m
+        assert depth_param["value"] == pytest.approx(-0.005)
+        assert depth_param["expression"] == "-5 mm"

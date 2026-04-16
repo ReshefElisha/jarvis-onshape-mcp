@@ -1,7 +1,9 @@
 """Pattern feature builders for Onshape."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from ._units import parse_length
 
 
 class PatternType(Enum):
@@ -18,30 +20,33 @@ class LinearPatternBuilder:
     def __init__(
         self,
         name: str = "Linear pattern",
-        distance: float = 1.0,
+        distance: Union[float, int, str] = 1.0,
         count: int = 2,
     ):
         """Initialize linear pattern builder.
 
         Args:
             name: Name of the pattern feature
-            distance: Spacing between instances in inches
+            distance: Spacing between instances. Bare numbers default to mm.
             count: Total number of instances including the original
         """
         self.name = name
-        self.distance = distance
+        self.distance: Union[float, int, str] = distance
         self.count = count
         self.distance_variable: Optional[str] = None
         self.feature_queries: List[str] = []
         self.direction_axis = "X"
 
     def set_distance(
-        self, distance: float, variable_name: Optional[str] = None
+        self,
+        distance: Union[float, int, str],
+        variable_name: Optional[str] = None,
     ) -> "LinearPatternBuilder":
         """Set the distance between pattern instances.
 
         Args:
-            distance: Distance in inches
+            distance: Distance. Bare numbers are mm; pass "<value> <unit>" for
+                explicit units.
             variable_name: Optional variable name to reference
 
         Returns:
@@ -127,9 +132,13 @@ class LinearPatternBuilder:
         if not self.feature_queries:
             raise ValueError("At least one feature must be added")
 
-        distance_expression = (
-            f"#{self.distance_variable}" if self.distance_variable else f"{self.distance} in"
-        )
+        if self.distance_variable:
+            distance_expression = f"#{self.distance_variable}"
+            distance_value_m = 0.0
+        else:
+            parsed = parse_length(self.distance)
+            distance_expression = parsed.expression
+            distance_value_m = parsed.meters
 
         return {
             "btType": "BTFeatureDefinitionCall-1406",
@@ -165,7 +174,7 @@ class LinearPatternBuilder:
                     {
                         "btType": "BTMParameterQuantity-147",
                         "isInteger": False,
-                        "value": self.distance,
+                        "value": distance_value_m,
                         "units": "",
                         "expression": distance_expression,
                         "parameterId": "distance",

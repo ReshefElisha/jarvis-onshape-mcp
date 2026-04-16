@@ -78,14 +78,25 @@ class TestChamferBuilder:
             assert type_param["value"] == ct.value
 
     def test_build_distance_without_variable(self):
+        """Bare numbers default to mm; value is meters."""
         chamfer = ChamferBuilder(distance=0.5)
         chamfer.add_edge("edge1")
         result = chamfer.build()
         params = result["feature"]["parameters"]
 
         width_param = next(p for p in params if p["parameterId"] == "width")
-        assert width_param["expression"] == "0.5 in"
-        assert width_param["value"] == 0.5
+        assert width_param["expression"] == "0.5 mm"
+        assert width_param["value"] == pytest.approx(0.0005)
+
+    def test_build_distance_with_unit_string(self):
+        chamfer = ChamferBuilder(distance="0.125 in")
+        chamfer.add_edge("edge1")
+        result = chamfer.build()
+        params = result["feature"]["parameters"]
+
+        width_param = next(p for p in params if p["parameterId"] == "width")
+        assert width_param["expression"] == "0.125 in"
+        assert width_param["value"] == pytest.approx(0.125 * 0.0254)
 
     def test_build_distance_with_variable(self):
         chamfer = ChamferBuilder()
