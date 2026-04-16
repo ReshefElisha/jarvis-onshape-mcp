@@ -1848,6 +1848,172 @@ class TestDeleteFeature:
         assert "404" in (parsed["error_message"] or "")
 
 
+class TestDeleteFeatureByName:
+    """Test delete_feature_by_name — lookup-by-name then delete."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_delete_by_name_success(self, mock_ps):
+        mock_ps.get_features = AsyncMock(return_value={
+            "features": [
+                {"featureId": "a", "name": "Sketch 1", "featureType": "newSketch"},
+                {"featureId": "b", "name": "Extrude 10mm", "featureType": "extrude"},
+            ],
+        })
+        mock_ps.delete_feature = AsyncMock(return_value={})
+
+        result = await call_tool("delete_feature_by_name", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "name": "Extrude 10mm",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_id"] == "b"
+        assert parsed["feature_name"] == "Extrude 10mm"
+        assert parsed["feature_type"] == "extrude"
+        mock_ps.delete_feature.assert_awaited_once()
+        # Deleted the right id, not a lookalike.
+        call = mock_ps.delete_feature.await_args
+        assert call[0][3] == "b"
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_delete_by_name_not_found(self, mock_ps):
+        """Unknown name surfaces available names in error_message."""
+        mock_ps.get_features = AsyncMock(return_value={
+            "features": [{"featureId": "a", "name": "Sketch 1"}],
+        })
+        mock_ps.delete_feature = AsyncMock()
+
+        result = await call_tool("delete_feature_by_name", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "name": "Nonexistent",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "Sketch 1" in (parsed["error_message"] or "")
+        mock_ps.delete_feature.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_delete_by_name_ambiguous(self, mock_ps):
+        """Multiple matches short-circuit with the list of ids so caller can pick."""
+        mock_ps.get_features = AsyncMock(return_value={
+            "features": [
+                {"featureId": "a", "name": "Fillet"},
+                {"featureId": "b", "name": "Fillet"},
+            ],
+        })
+        mock_ps.delete_feature = AsyncMock()
+
+        result = await call_tool("delete_feature_by_name", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "name": "Fillet",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "a" in (parsed["error_message"] or "") and "b" in (parsed["error_message"] or "")
+        mock_ps.delete_feature.assert_not_called()
+
+
+class TestUpdateFeature:
+    """Test update_feature — patch params on an existing feature."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.update_feature_params_and_check")
+    async def test_update_feature_success(self, mock_update):
+        """Handler passes the patch list through and returns structured JSON."""
+        mock_update.return_value = _mock_apply_result(
+            feature_id="fId", feature_name="Extrude 10mm", feature_type="extrude",
+        )
+
+        result = await call_tool("update_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "fId",
+            "updates": [{"parameterId": "depth", "expression": "15 mm"}],
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["feature_id"] == "fId"
+
+        pos = mock_update.await_args[0]
+        assert pos[4] == "fId"  # feature_id
+        assert pos[5] == [{"parameterId": "depth", "expression": "15 mm"}]
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.update_feature_params_and_check")
+    async def test_update_feature_onshape_error(self, mock_update):
+        """Post-patch featureStatus=ERROR must bubble up as ok=false."""
+        mock_update.return_value = _mock_apply_result(
+            ok=False, status="ERROR", feature_id="fId",
+            error_message="Depth cannot be negative",
+        )
+        result = await call_tool("update_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "fId",
+            "updates": [{"parameterId": "depth", "expression": "-15 mm"}],
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "ERROR"
+        assert "negative" in (parsed["error_message"] or "")
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.update_feature_params_and_check")
+    async def test_update_feature_value_error(self, mock_update):
+        """feature_id not on element surfaces as EXCEPTION with clear message."""
+        mock_update.side_effect = ValueError("feature_id 'bogus' not found")
+        result = await call_tool("update_feature", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "featureId": "bogus",
+            "updates": [{"parameterId": "depth", "expression": "15 mm"}],
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "not found" in (parsed["error_message"] or "")
+
+
+class TestDeleteDocument:
+    """Test delete_document — REST DELETE wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_delete_document_success(self, mock_docs):
+        mock_docs.delete_document = AsyncMock(return_value={})
+
+        result = await call_tool("delete_document", {"documentId": "doc_xyz"})
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is True
+        assert parsed["document_id"] == "doc_xyz"
+        mock_docs.delete_document.assert_awaited_once_with("doc_xyz")
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.document_manager")
+    async def test_delete_document_http_error(self, mock_docs):
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_response.text = "Forbidden"
+        mock_docs.delete_document = AsyncMock(
+            side_effect=httpx.HTTPStatusError("Forbidden", request=Mock(), response=mock_response)
+        )
+        result = await call_tool("delete_document", {"documentId": "bogus"})
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "403" in (parsed["error_message"] or "")
+
+
 class TestFeatureScriptTools:
     """Test FeatureScript tool handlers."""
 

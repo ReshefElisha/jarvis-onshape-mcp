@@ -22,6 +22,7 @@ class ExtrudeBuilder:
         sketch_feature_id: Optional[str] = None,
         depth: float = 1.0,
         operation_type: ExtrudeType = ExtrudeType.NEW,
+        opposite_direction: bool = False,
     ):
         """Initialize extrude builder.
 
@@ -30,12 +31,15 @@ class ExtrudeBuilder:
             sketch_feature_id: ID of the sketch to extrude
             depth: Extrude depth in inches
             operation_type: Type of extrude operation
+            opposite_direction: If True, extrude against the sketch normal.
+                Essential for REMOVE on a +Z face (cut into material, not air).
         """
         self.name = name
         self.sketch_feature_id = sketch_feature_id
         self.depth = depth
         self.operation_type = operation_type
         self.depth_variable: Optional[str] = None
+        self.opposite_direction = opposite_direction
 
     def set_depth(self, depth: float, variable_name: Optional[str] = None) -> "ExtrudeBuilder":
         """Set extrude depth.
@@ -120,7 +124,7 @@ class ExtrudeBuilder:
                     },
                     {
                         "btType": "BTMParameterBoolean-144",
-                        "value": False,
+                        "value": self.opposite_direction,
                         "parameterId": "oppositeDirection",
                         "parameterName": "",
                         "libraryRelationType": "NONE",

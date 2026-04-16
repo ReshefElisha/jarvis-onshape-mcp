@@ -28,7 +28,11 @@ from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
-from .api.feature_apply import apply_feature_and_check, FeatureApplyResult
+from .api.feature_apply import (
+    apply_feature_and_check,
+    update_feature_params_and_check,
+    FeatureApplyResult,
+)
 from .api.entities import EntityManager
 from .api.measurements import MeasurementManager
 from .api.rendering import (
@@ -154,6 +158,17 @@ async def list_tools() -> list[Tool]:
                         "description": "Extrude operation type",
                         "default": "NEW",
                     },
+                    "oppositeDirection": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, extrude in the direction OPPOSITE the sketch normal. "
+                            "CRITICAL for REMOVE on a sketched face: without this, the cut "
+                            "goes away from the material (into air) and silently removes "
+                            "nothing (Onshape returns featureStatus=INFO). Default false; "
+                            "set true for 'cut into existing body from a +Z face' patterns."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId", "depth"],
             },
@@ -266,6 +281,63 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "featureId"],
+            },
+        ),
+        Tool(
+            name="delete_feature_by_name",
+            description=(
+                "Delete a Part Studio feature by its display name (e.g. "
+                "'Extrude 10mm', 'Sketch 1') without having to look up the "
+                "feature ID first. Returns ERROR if zero or multiple features "
+                "match the name so the caller can disambiguate."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Exact feature name (case-sensitive)"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "name"],
+            },
+        ),
+        Tool(
+            name="update_feature",
+            description=(
+                "Modify parameters on an existing Part Studio feature (for "
+                "iteration: 'change the extrude depth from 10mm to 15mm', "
+                "'swap the fillet radius to 2mm', 'flip oppositeDirection'). "
+                "Updates are keyed by the feature's parameterId (e.g. 'depth', "
+                "'radius', 'operationType', 'oppositeDirection'). For quantity "
+                "params, set `expression` (\"15 mm\", \"0.5 in\", \"90 deg\"). "
+                "For boolean/enum params, set `value`. Returns the standard "
+                "{ok, status, feature_id, ...} contract so you can tell if the "
+                "patched feature still regenerates."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "ID of the feature to update"},
+                    "updates": {
+                        "type": "array",
+                        "description": "Per-parameter patches to apply",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "parameterId": {"type": "string", "description": "Parameter key (e.g. 'depth')"},
+                                "expression": {"type": "string", "description": "Dimensional expression (quantity params)"},
+                                "value": {"description": "Literal value (enum/boolean params)"},
+                            },
+                            "required": ["parameterId"],
+                        },
+                        "minItems": 1,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId", "updates"],
             },
         ),
         Tool(
@@ -414,6 +486,21 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="delete_document",
+            description=(
+                "Move an Onshape document to the trash. Irreversible via the "
+                "API; intended for cleanup of throwaway docs created by an "
+                "agent (test/iteration runs). Returns {ok, status, document_id}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID to delete"},
+                },
+                "required": ["documentId"],
             },
         ),
         Tool(
@@ -1582,10 +1669,16 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
     elif name == "create_extrude":
         try:
             op_type = ExtrudeType[arguments.get("operationType", "NEW")]
+            # Smart default: if this is a REMOVE extrude on a face (faceId context
+            # unknown here, but REMOVE + default direction cuts AWAY from the
+            # sketch, which is almost never what the user wants on a top-facing
+            # face) -- let the caller override via oppositeDirection.
+            opp = bool(arguments.get("oppositeDirection", False))
             extrude = ExtrudeBuilder(
                 name=arguments.get("name", "Extrude"),
                 sketch_feature_id=arguments["sketchFeatureId"],
                 operation_type=op_type,
+                opposite_direction=opp,
             )
             extrude.set_depth(arguments["depth"], variable_name=arguments.get("variableDepth"))
 
@@ -1780,6 +1873,79 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error deleting feature")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "delete_feature_by_name":
+        try:
+            target_name = arguments["name"]
+            features_doc = await partstudio_manager.get_features(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+            )
+            features = features_doc.get("features") or []
+            matches = [
+                f for f in features
+                if f.get("name") == target_name and f.get("featureId")
+            ]
+            if not matches:
+                available = sorted({f.get("name", "") for f in features if f.get("name")})
+                return [TextContent(type="text", text=_exception_json(
+                    ValueError(
+                        f"No feature named {target_name!r} in this element. "
+                        f"Available names: {available}"
+                    ),
+                    tool_name=name,
+                ))]
+            if len(matches) > 1:
+                ids = [f.get("featureId") for f in matches]
+                return [TextContent(type="text", text=_exception_json(
+                    ValueError(
+                        f"{len(matches)} features named {target_name!r}; "
+                        f"cannot disambiguate. Use delete_feature with a "
+                        f"specific featureId. Matching ids: {ids}"
+                    ),
+                    tool_name=name,
+                ))]
+            deleted = matches[0]
+            deleted_fid = deleted["featureId"]
+            await partstudio_manager.delete_feature(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                deleted_fid,
+            )
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "feature_id": deleted_fid,
+                "feature_type": deleted.get("featureType") or deleted.get("btType", ""),
+                "feature_name": target_name,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error in delete_feature_by_name")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "update_feature":
+        try:
+            result = await update_feature_params_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["featureId"],
+                arguments["updates"],
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error updating feature")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "list_documents":
@@ -2178,6 +2344,37 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 )
             ]
 
+    elif name == "delete_document":
+        try:
+            await document_manager.delete_document(arguments["documentId"])
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "document_id": arguments["documentId"],
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            logger.error(f"API error deleting document: {status_code}")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": f"HTTP {status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
+        except Exception as e:
+            logger.exception("Unexpected error deleting document")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
+
     elif name == "create_part_studio":
         try:
             result = await partstudio_manager.create_part_studio(
@@ -2414,8 +2611,16 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         try:
             plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
+            # Accept either center=[x,y] (matches create_sketch_rectangle's
+            # array-of-numbers convention) or centerX/centerY (legacy schema).
+            # LLMs reliably mix these up when calling blind; support both.
+            if "center" in arguments and arguments["center"] is not None:
+                cx, cy = arguments["center"][0], arguments["center"][1]
+            else:
+                cx = arguments.get("centerX", 0)
+                cy = arguments.get("centerY", 0)
             sketch.add_circle(
-                center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
+                center=(cx, cy),
                 radius=arguments["radius"],
             )
             result = await apply_feature_and_check(
