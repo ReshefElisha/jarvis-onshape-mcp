@@ -209,9 +209,21 @@ class TestSketchBuilderCircle:
         assert abs(arc2["startParam"] - math.pi) < 1e-10
         assert abs(arc2["endParam"] - 2.0 * math.pi) < 1e-10
 
-    def test_add_circle_converts_to_meters(self):
+    def test_add_circle_bare_numbers_are_mm_default(self):
+        """Under the unit convention, bare numeric coords are mm (not inches)."""
         sketch = SketchBuilder()
         sketch.add_circle(center=(1.0, 2.0), radius=3.0)
+
+        geo = sketch.entities[0]["geometry"]
+        # 1 mm = 0.001 m
+        assert abs(geo["xCenter"] - 0.001) < 1e-10
+        assert abs(geo["yCenter"] - 0.002) < 1e-10
+        assert abs(geo["radius"] - 0.003) < 1e-10
+
+    def test_add_circle_explicit_inch_string(self):
+        """`"1 in"` still gets 0.0254 m, proving explicit units override default."""
+        sketch = SketchBuilder()
+        sketch.add_circle(center=("1 in", "2 in"), radius="3 in")
 
         geo = sketch.entities[0]["geometry"]
         assert abs(geo["xCenter"] - 1.0 * 0.0254) < 1e-10

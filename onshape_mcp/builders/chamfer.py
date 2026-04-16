@@ -1,7 +1,9 @@
 """Chamfer feature builder for Onshape."""
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from ._units import parse_length
 
 
 class ChamferType(Enum):
@@ -18,29 +20,32 @@ class ChamferBuilder:
     def __init__(
         self,
         name: str = "Chamfer",
-        distance: float = 0.1,
+        distance: Union[float, int, str] = 0.1,
         chamfer_type: ChamferType = ChamferType.EQUAL_OFFSETS,
     ):
         """Initialize chamfer builder.
 
         Args:
             name: Name of the chamfer feature
-            distance: Chamfer distance in inches
+            distance: Chamfer distance. Bare numbers default to mm.
             chamfer_type: Type of chamfer geometry
         """
         self.name = name
-        self.distance = distance
+        self.distance: Union[float, int, str] = distance
         self.distance_variable: Optional[str] = None
         self.chamfer_type = chamfer_type
         self.edge_queries: List[str] = []
 
     def set_distance(
-        self, distance: float, variable_name: Optional[str] = None
+        self,
+        distance: Union[float, int, str],
+        variable_name: Optional[str] = None,
     ) -> "ChamferBuilder":
         """Set chamfer distance.
 
         Args:
-            distance: Distance in inches
+            distance: Distance. Bare numbers are mm; pass `"0.125 in"` etc.
+                for explicit units.
             variable_name: Optional variable name to reference
 
         Returns:
@@ -74,9 +79,13 @@ class ChamferBuilder:
         if not self.edge_queries:
             raise ValueError("At least one edge must be added")
 
-        distance_expression = (
-            f"#{self.distance_variable}" if self.distance_variable else f"{self.distance} in"
-        )
+        if self.distance_variable:
+            distance_expression = f"#{self.distance_variable}"
+            distance_value_m = 0.0
+        else:
+            parsed = parse_length(self.distance)
+            distance_expression = parsed.expression
+            distance_value_m = parsed.meters
 
         return {
             "btType": "BTFeatureDefinitionCall-1406",
@@ -111,7 +120,7 @@ class ChamferBuilder:
                     {
                         "btType": "BTMParameterQuantity-147",
                         "isInteger": False,
-                        "value": self.distance,
+                        "value": distance_value_m,
                         "units": "",
                         "expression": distance_expression,
                         "parameterId": "width",

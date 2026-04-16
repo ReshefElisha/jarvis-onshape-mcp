@@ -100,14 +100,25 @@ class TestLinearPatternBuilder:
             assert expected in dir_param["queries"][0]["queryString"]
 
     def test_build_distance_without_variable(self):
+        """Bare numbers default to mm; value is meters."""
         lp = LinearPatternBuilder(distance=2.5)
         lp.add_feature("f1")
         result = lp.build()
         params = result["feature"]["parameters"]
 
         dist = next(p for p in params if p["parameterId"] == "distance")
-        assert dist["expression"] == "2.5 in"
-        assert dist["value"] == 2.5
+        assert dist["expression"] == "2.5 mm"
+        assert dist["value"] == pytest.approx(0.0025)
+
+    def test_build_distance_with_unit_string(self):
+        lp = LinearPatternBuilder(distance="30 mm")
+        lp.add_feature("f1")
+        result = lp.build()
+        params = result["feature"]["parameters"]
+
+        dist = next(p for p in params if p["parameterId"] == "distance")
+        assert dist["expression"] == "30 mm"
+        assert dist["value"] == pytest.approx(0.030)
 
     def test_build_distance_with_variable(self):
         lp = LinearPatternBuilder()

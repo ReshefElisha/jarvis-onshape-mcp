@@ -1,7 +1,9 @@
 """Extrude feature builder for Onshape."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from enum import Enum
+
+from ._units import parse_length
 
 
 class ExtrudeType(Enum):
@@ -20,7 +22,7 @@ class ExtrudeBuilder:
         self,
         name: str = "Extrude",
         sketch_feature_id: Optional[str] = None,
-        depth: float = 1.0,
+        depth: Union[float, int, str] = 1.0,
         operation_type: ExtrudeType = ExtrudeType.NEW,
         opposite_direction: bool = False,
     ):
@@ -29,23 +31,29 @@ class ExtrudeBuilder:
         Args:
             name: Name of the extrude feature
             sketch_feature_id: ID of the sketch to extrude
-            depth: Extrude depth in inches
+            depth: Extrude depth. Bare numbers default to millimeters; pass a
+                string like "1.5 in" for explicit units.
             operation_type: Type of extrude operation
             opposite_direction: If True, extrude against the sketch normal.
                 Essential for REMOVE on a +Z face (cut into material, not air).
         """
         self.name = name
         self.sketch_feature_id = sketch_feature_id
-        self.depth = depth
+        self.depth: Union[float, int, str] = depth
         self.operation_type = operation_type
         self.depth_variable: Optional[str] = None
         self.opposite_direction = opposite_direction
 
-    def set_depth(self, depth: float, variable_name: Optional[str] = None) -> "ExtrudeBuilder":
+    def set_depth(
+        self,
+        depth: Union[float, int, str],
+        variable_name: Optional[str] = None,
+    ) -> "ExtrudeBuilder":
         """Set extrude depth.
 
         Args:
-            depth: Depth in inches
+            depth: Depth. Bare numbers are mm; pass "0.5 in" / "15 mm" etc.
+                for explicit units.
             variable_name: Optional variable name to reference
 
         Returns:
@@ -76,7 +84,13 @@ class ExtrudeBuilder:
         if not self.sketch_feature_id:
             raise ValueError("Sketch feature ID must be set before building extrude")
 
-        depth_expression = f"#{self.depth_variable}" if self.depth_variable else f"{self.depth} in"
+        if self.depth_variable:
+            depth_expression = f"#{self.depth_variable}"
+            depth_value_m = 0.0  # Onshape re-evaluates when variable resolves
+        else:
+            parsed = parse_length(self.depth)
+            depth_expression = parsed.expression
+            depth_value_m = parsed.meters
 
         return {
             "btType": "BTFeatureDefinitionCall-1406",
@@ -115,7 +129,7 @@ class ExtrudeBuilder:
                     {
                         "btType": "BTMParameterQuantity-147",
                         "isInteger": False,
-                        "value": self.depth,
+                        "value": depth_value_m,
                         "units": "",
                         "expression": depth_expression,
                         "parameterId": "depth",

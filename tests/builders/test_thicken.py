@@ -144,7 +144,7 @@ class TestThickenBuilder:
         assert thickness_param["expression"] == "#wall_thickness"
 
     def test_build_with_literal_thickness_expression(self):
-        """Test that literal thickness gets ' in' suffix."""
+        """Bare numbers default to mm (not inches) under the unit convention."""
         thicken = ThickenBuilder(name="Test", sketch_feature_id="sketch1")
         thicken.set_thickness(1.25)
 
@@ -152,7 +152,18 @@ class TestThickenBuilder:
         parameters = result["parameters"]
 
         thickness_param = next(p for p in parameters if p["parameterId"] == "thickness1")
-        assert thickness_param["expression"] == "1.25 in"
+        assert thickness_param["expression"] == "1.25 mm"
+
+    def test_build_with_explicit_unit_string(self):
+        """String with unit suffix round-trips to the expression."""
+        thicken = ThickenBuilder(name="Test", sketch_feature_id="sketch1")
+        thicken.set_thickness("0.25 in")
+
+        result = thicken.build()
+        parameters = result["parameters"]
+
+        thickness_param = next(p for p in parameters if p["parameterId"] == "thickness1")
+        assert thickness_param["expression"] == "0.25 in"
 
     def test_build_includes_operation_type(self):
         """Test that build() includes operation type parameter."""
@@ -250,7 +261,7 @@ class TestThickenBuilder:
         thickness2_param = next(p for p in parameters if p["parameterId"] == "thickness2")
 
         assert thickness2_param["btType"] == "BTMParameterQuantity-147"
-        assert thickness2_param["expression"] == "0 in"
+        assert thickness2_param["expression"] == "0 mm"
 
     def test_build_complete_feature_with_all_options(self):
         """Test building a complete thicken feature with all options set."""
