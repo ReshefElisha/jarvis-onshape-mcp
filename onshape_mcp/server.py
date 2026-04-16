@@ -3,12 +3,13 @@
 import os
 import sys
 import asyncio
+import base64
 from typing import Any
 import httpx
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, ImageContent
 from loguru import logger
 
 # Load environment variables from .env file before local imports read them.
@@ -26,6 +27,13 @@ from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
+from .api.rendering import (
+    ShadedViewManager,
+    crop_cached_image,
+    get_image,
+    get_image_meta,
+    list_cached_image_ids,
+)
 from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
 from .builders.chamfer import ChamferBuilder, ChamferType
@@ -47,9 +55,11 @@ logger.add(
 # Initialize server
 app = Server("onshape-mcp")
 
-# Initialize Onshape client
-_ak = os.getenv("ONSHAPE_ACCESS_KEY", "")
-_sk = os.getenv("ONSHAPE_SECRET_KEY", "")
+# Initialize Onshape client. Accept both naming conventions: upstream uses
+# ONSHAPE_ACCESS_KEY/SECRET_KEY, Onshape's developer portal examples use
+# ONSHAPE_API_KEY/SECRET. Fall back from the former to the latter.
+_ak = os.getenv("ONSHAPE_ACCESS_KEY") or os.getenv("ONSHAPE_API_KEY", "")
+_sk = os.getenv("ONSHAPE_SECRET_KEY") or os.getenv("ONSHAPE_API_SECRET", "")
 credentials = OnshapeCredentials(access_key=_ak, secret_key=_sk)
 client = OnshapeClient(credentials)
 partstudio_manager = PartStudioManager(client)
@@ -58,6 +68,7 @@ document_manager = DocumentManager(client)
 assembly_manager = AssemblyManager(client)
 featurescript_manager = FeatureScriptManager(client)
 export_manager = ExportManager(client)
+shaded_view_manager = ShadedViewManager(client)
 
 
 @app.list_tools()
@@ -867,7 +878,13 @@ async def list_tools() -> list[Tool]:
         # === Export Tools ===
         Tool(
             name="export_part_studio",
-            description="Export a Part Studio to STL, STEP, or other format",
+            description=(
+                "Export a Part Studio to STL, STEP, PARASOLID, GLTF, or OBJ. "
+                "Blocks until Onshape finishes the translation, downloads the "
+                "bytes, and writes them to /tmp/onshape-mcp-exports/. Returns "
+                "the on-disk path, size, and final state so the user can open "
+                "the file. Raises an explicit error on FAILED or timeout."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -881,13 +898,28 @@ async def list_tools() -> list[Tool]:
                         "default": "STL",
                     },
                     "partId": {"type": "string", "description": "Optional specific part ID to export"},
+                    "timeoutSeconds": {
+                        "type": "number",
+                        "description": "Max seconds to wait for translation",
+                        "default": 120,
+                    },
+                    "pollIntervalSeconds": {
+                        "type": "number",
+                        "description": "Seconds between status polls",
+                        "default": 1.0,
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
             },
         ),
         Tool(
             name="export_assembly",
-            description="Export an Assembly to STL, STEP, or other format",
+            description=(
+                "Export an Assembly to STL, STEP, or GLTF. Blocks until "
+                "Onshape finishes the translation, downloads the bytes, and "
+                "writes them to /tmp/onshape-mcp-exports/. Returns on-disk "
+                "path, size, and final state."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -899,6 +931,16 @@ async def list_tools() -> list[Tool]:
                         "enum": ["STL", "STEP", "GLTF"],
                         "description": "Export format",
                         "default": "STL",
+                    },
+                    "timeoutSeconds": {
+                        "type": "number",
+                        "description": "Max seconds to wait for translation",
+                        "default": 120,
+                    },
+                    "pollIntervalSeconds": {
+                        "type": "number",
+                        "description": "Seconds between status polls",
+                        "default": 1.0,
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
@@ -1012,10 +1054,146 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
         ),
+        # === Visual / Rendering Tools (added by dyna-fork) ===
+        Tool(
+            name="render_part_studio_views",
+            description=(
+                "Render one or more shaded views of a Part Studio and return the PNGs so "
+                "Claude can actually see the 3D result. Use this after every feature that "
+                "creates or modifies visible geometry. The returned image_ids can be passed "
+                "to crop_image to zoom into suspicious regions. Claude Opus 4.7 spatial "
+                "reasoning is weak — always render the view you need rather than mentally "
+                "rotating. Default views: iso, top, front, right."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "views": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "List of named views (iso, top, front, back, left, right, bottom) "
+                            "or raw comma-separated 12-float viewMatrix strings."
+                        ),
+                        "default": ["iso", "top", "front", "right"],
+                    },
+                    "width": {"type": "integer", "default": 1200, "description": "Output width in pixels"},
+                    "height": {"type": "integer", "default": 800, "description": "Output height in pixels"},
+                    "edges": {"type": "boolean", "default": True, "description": "Render feature/silhouette edges"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="render_assembly_views",
+            description=(
+                "Render shaded views of an Assembly. Same semantics as render_part_studio_views."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "views": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": ["iso", "top", "front", "right"],
+                    },
+                    "width": {"type": "integer", "default": 1200},
+                    "height": {"type": "integer", "default": 800},
+                    "edges": {"type": "boolean", "default": True},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="crop_image",
+            description=(
+                "Zoom into a region of a cached image by normalized 0..1 bounding box. "
+                "Use after render_* when you need to inspect a detail — a specific face, "
+                "a feature edge, a suspicious fillet. (0,0) is top-left, (1,1) is "
+                "bottom-right. Returns a new image keyed by its own image_id. This is "
+                "the pattern behind Anthropic's CharXiv 84.7 -> 91.0% 'with tools' "
+                "benchmark result; use it liberally."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "imageId": {"type": "string", "description": "image_id from a previous render_* or crop_image call"},
+                    "x1": {"type": "number", "minimum": 0, "maximum": 1, "description": "Left edge (0..1)"},
+                    "y1": {"type": "number", "minimum": 0, "maximum": 1, "description": "Top edge (0..1)"},
+                    "x2": {"type": "number", "minimum": 0, "maximum": 1, "description": "Right edge (0..1), must be > x1"},
+                    "y2": {"type": "number", "minimum": 0, "maximum": 1, "description": "Bottom edge (0..1), must be > y1"},
+                },
+                "required": ["imageId", "x1", "y1", "x2", "y2"],
+            },
+        ),
+        Tool(
+            name="list_cached_images",
+            description=(
+                "List every image currently in the in-process render cache with its "
+                "metadata (view, source part studio, dimensions, crop lineage). Use to "
+                "recover an image_id you need to crop or re-render, or to audit what "
+                "you've looked at so far."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ]
 
 
 METERS_TO_INCHES = 1 / 0.0254
+
+EXPORT_DIR = "/tmp/onshape-mcp-exports"
+
+
+def _write_export_to_disk(result, element_id: str) -> str:
+    """Persist a successful TranslationResult to EXPORT_DIR and return the path.
+
+    Filename is prefixed with a timestamp + element ID prefix so a user running
+    many exports can tell artifacts apart without relying on the translation id.
+    Raises if called on a non-ok result.
+    """
+    import os
+    import time
+
+    if not result.ok or result.data is None:
+        raise ValueError("Cannot write a failed translation result to disk")
+
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    ts = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    base = result.filename or f"{result.translation_id}.{result.format_name.lower()}"
+    # Keep filenames short and recognizable.
+    short_elem = element_id[:8] if element_id else "x"
+    safe_base = base.replace("/", "_").replace(" ", "_")
+    out_path = os.path.join(EXPORT_DIR, f"{ts}-{short_elem}-{safe_base}")
+    with open(out_path, "wb") as f:
+        f.write(result.data)
+    return out_path
+
+
+def _format_export_result(result, element_id: str) -> str:
+    """Format a TranslationResult as the text body returned to the MCP client."""
+    if not result.ok:
+        return (
+            f"Export FAILED ({result.state}).\n"
+            f"Translation ID: {result.translation_id or '<none>'}\n"
+            f"Format: {result.format_name}\n"
+            f"Error: {result.error_message or 'unknown'}"
+        )
+    out_path = _write_export_to_disk(result, element_id)
+    size = len(result.data)
+    return (
+        f"Export DONE.\n"
+        f"Path: {out_path}\n"
+        f"Size: {size} bytes\n"
+        f"Format: {result.format_name}\n"
+        f"Filename: {result.filename}\n"
+        f"Translation ID: {result.translation_id}"
+    )
 
 
 def _enrich_rectangular_body(
@@ -1169,7 +1347,7 @@ async def _create_mate(
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: Any) -> list[TextContent]:
+async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageContent]:
     """Handle tool calls."""
 
     if name == "create_sketch_rectangle":
@@ -1247,7 +1425,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=f"Created extrude '{arguments.get('name', 'Extrude')}'. Feature ID: {result.get('featureId', 'unknown')}",
+                    text=f"Created extrude '{arguments.get('name', 'Extrude')}'. Feature ID: {result.get('feature', {}).get('featureId', result.get('featureId', 'unknown'))}",
                 )
             ]
         except httpx.HTTPStatusError as e:
@@ -1315,7 +1493,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=f"Created thicken '{arguments.get('name', 'Thicken')}'. Feature ID: {result.get('featureId', 'unknown')}",
+                    text=f"Created thicken '{arguments.get('name', 'Thicken')}'. Feature ID: {result.get('feature', {}).get('featureId', result.get('featureId', 'unknown'))}",
                 )
             ]
         except httpx.HTTPStatusError as e:
@@ -2316,35 +2494,47 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
     elif name == "export_part_studio":
         try:
-            result = await export_manager.export_part_studio(
+            result = await export_manager.export_part_studio_and_download(
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
                 element_id=arguments["elementId"],
                 format_name=arguments.get("format", "STL"),
                 part_id=arguments.get("partId"),
+                timeout_seconds=float(arguments.get("timeoutSeconds", 120)),
+                poll_interval_seconds=float(arguments.get("pollIntervalSeconds", 1.0)),
             )
-            translation_id = result.get("id", "unknown")
-            state = result.get("requestState", "unknown")
-            return [TextContent(type="text", text=f"Export started. Translation ID: {translation_id}\nState: {state}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=_format_export_result(result, arguments["elementId"]),
+                )
+            ]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error exporting: API returned {e.response.status_code}.")]
         except Exception as e:
+            logger.exception("Unexpected error exporting Part Studio")
             return [TextContent(type="text", text=f"Error exporting: {str(e)}")]
 
     elif name == "export_assembly":
         try:
-            result = await export_manager.export_assembly(
+            result = await export_manager.export_assembly_and_download(
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
                 element_id=arguments["elementId"],
                 format_name=arguments.get("format", "STL"),
+                timeout_seconds=float(arguments.get("timeoutSeconds", 120)),
+                poll_interval_seconds=float(arguments.get("pollIntervalSeconds", 1.0)),
             )
-            translation_id = result.get("id", "unknown")
-            state = result.get("requestState", "unknown")
-            return [TextContent(type="text", text=f"Export started. Translation ID: {translation_id}\nState: {state}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=_format_export_result(result, arguments["elementId"]),
+                )
+            ]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error exporting: API returned {e.response.status_code}.")]
         except Exception as e:
+            logger.exception("Unexpected error exporting Assembly")
             return [TextContent(type="text", text=f"Error exporting: {str(e)}")]
 
     elif name == "check_assembly_interference":
@@ -2598,6 +2788,118 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=f"Error querying face CS: API returned {e.response.status_code}.")]
         except Exception as e:
             return [TextContent(type="text", text=f"Error querying face CS: {str(e)}")]
+
+    # === Visual / Rendering Tools (added by dyna-fork) ===
+    elif name in ("render_part_studio_views", "render_assembly_views"):
+        try:
+            render_fn = (
+                shaded_view_manager.render_part_studio_views
+                if name == "render_part_studio_views"
+                else shaded_view_manager.render_assembly_views
+            )
+            rendered = await render_fn(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                views=arguments.get("views") or None,
+                width=int(arguments.get("width", 1200)),
+                height=int(arguments.get("height", 800)),
+                edges=bool(arguments.get("edges", True)),
+            )
+            out: list[TextContent | ImageContent] = [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Rendered {len(rendered)} view(s). image_ids can be passed to "
+                        "crop_image. "
+                        + ", ".join(
+                            f"{r.view}={r.image_id} ({r.width}x{r.height}, {r.bytes}B)"
+                            for r in rendered
+                        )
+                    ),
+                )
+            ]
+            for r in rendered:
+                png = get_image(r.image_id)
+                out.append(
+                    ImageContent(
+                        type="image",
+                        data=base64.b64encode(png).decode("ascii"),
+                        mimeType="image/png",
+                    )
+                )
+            return out
+        except httpx.HTTPStatusError as e:
+            body = ""
+            try:
+                body = e.response.text[:400]
+            except Exception:
+                pass
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Render failed: HTTP {e.response.status_code} on /shadedviews. "
+                        f"Body: {body}"
+                    ),
+                )
+            ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Render failed: {e}")]
+
+    elif name == "crop_image":
+        try:
+            rv = crop_cached_image(
+                image_id=arguments["imageId"],
+                x1=arguments["x1"],
+                y1=arguments["y1"],
+                x2=arguments["x2"],
+                y2=arguments["y2"],
+            )
+            png = get_image(rv.image_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Cropped {arguments['imageId']} to "
+                        f"({arguments['x1']:.3f},{arguments['y1']:.3f})-"
+                        f"({arguments['x2']:.3f},{arguments['y2']:.3f}): "
+                        f"{rv.width}x{rv.height}px. New image_id: {rv.image_id}"
+                    ),
+                ),
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType="image/png",
+                ),
+            ]
+        except KeyError:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"crop_image: image_id '{arguments.get('imageId')}' not in cache. Call list_cached_images to see what's available.",
+                )
+            ]
+        except ValueError as e:
+            return [TextContent(type="text", text=f"crop_image: {e}")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"crop_image failed: {e}")]
+
+    elif name == "list_cached_images":
+        entries = list_cached_image_ids()
+        if not entries:
+            return [TextContent(type="text", text="No images cached yet. Call render_part_studio_views or render_assembly_views first.")]
+        lines = [f"{len(entries)} image(s) in cache:"]
+        for e in entries:
+            view = e.get("view", "?")
+            src = e.get("source", {})
+            dims = f"{e.get('width', '?')}x{e.get('height', '?')}"
+            crop_of = e.get("crop_of")
+            crop_note = f" (crop of {crop_of} bbox={e.get('crop_bbox')})" if crop_of else ""
+            lines.append(
+                f"  - {e['image_id']}: view={view} source={src.get('kind','?')}:{src.get('eid','?')} {dims} {e['bytes']}B{crop_note}"
+            )
+        return [TextContent(type="text", text="\n".join(lines))]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
