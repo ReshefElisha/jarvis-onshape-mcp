@@ -29,6 +29,7 @@ from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
 from .api.feature_apply import apply_feature_and_check, FeatureApplyResult
+from .api.entities import EntityManager
 from .api.rendering import (
     ShadedViewManager,
     crop_cached_image,
@@ -71,6 +72,7 @@ assembly_manager = AssemblyManager(client)
 featurescript_manager = FeatureScriptManager(client)
 export_manager = ExportManager(client)
 shaded_view_manager = ShadedViewManager(client)
+entity_manager = EntityManager(client)
 
 
 @app.list_tools()
@@ -1132,6 +1134,39 @@ async def list_tools() -> list[Tool]:
                     "y2": {"type": "number", "minimum": 0, "maximum": 1, "description": "Bottom edge (0..1), must be > y1"},
                 },
                 "required": ["imageId", "x1", "y1", "x2", "y2"],
+            },
+        ),
+        Tool(
+            name="list_entities",
+            description=(
+                "Enumerate every face, edge, and vertex of every body in a Part Studio "
+                "with deterministic IDs you can drop into subsequent feature payloads. "
+                "Each entity has a human-readable 'description' like 'plane / normal +Z / "
+                "origin (0.0,0.0,15.0) mm' or 'cylinder / radius 5.00 mm / origin ... mm' "
+                "so you can pick the right one by reading rather than geometric reasoning. "
+                "Call this after ANY feature that creates or modifies bodies, before "
+                "sketching on a face, filleting an edge, mating to a face, or otherwise "
+                "referencing picked geometry. IDs (JHK, JNC, JHl, ...) are the "
+                "'deterministicIds' you put in a BTMIndividualQuery-138 query entry."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "kinds": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["faces", "edges", "vertices"]},
+                        "description": "Subset to return; defaults to all three.",
+                        "default": ["faces", "edges", "vertices"],
+                    },
+                    "bodyIndex": {
+                        "type": "integer",
+                        "description": "0-based body index to limit output. Omit for all bodies.",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
             },
         ),
         Tool(
@@ -2933,6 +2968,27 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=f"crop_image: {e}")]
         except Exception as e:
             return [TextContent(type="text", text=f"crop_image failed: {e}")]
+
+    elif name == "list_entities":
+        try:
+            import json as _json
+            result = await entity_manager.list_entities(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                kinds=arguments.get("kinds") or None,
+                body_index=arguments.get("bodyIndex"),
+            )
+            return [TextContent(type="text", text=_json.dumps(result, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"list_entities failed: HTTP {e.response.status_code} on /bodydetails.",
+                )
+            ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"list_entities failed: {e}")]
 
     elif name == "list_cached_images":
         entries = list_cached_image_ids()
