@@ -30,6 +30,7 @@ from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
 from .api.feature_apply import apply_feature_and_check, FeatureApplyResult
 from .api.entities import EntityManager
+from .api.measurements import MeasurementManager
 from .api.rendering import (
     ShadedViewManager,
     crop_cached_image,
@@ -73,6 +74,7 @@ featurescript_manager = FeatureScriptManager(client)
 export_manager = ExportManager(client)
 shaded_view_manager = ShadedViewManager(client)
 entity_manager = EntityManager(client)
+measurement_manager = MeasurementManager(client)
 
 
 @app.list_tools()
@@ -1194,6 +1196,52 @@ async def list_tools() -> list[Tool]:
                     "bodyIndex": {
                         "type": "integer",
                         "description": "0-based body index to limit output. Omit for all bodies.",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="measure",
+            description=(
+                "Numeric distance + angle between two entities (faces/edges/vertices) "
+                "picked by deterministic ID. Use this instead of eyeballing a render when "
+                "you need precise geometric facts: 'are these faces parallel?', 'what's "
+                "the distance between the top face and the hole floor?', 'is this edge "
+                "perpendicular to that plane?'. Input: two IDs from list_entities. Returns "
+                "point_distance_m, angle_deg, parallel/perpendicular flags, and when "
+                "applicable a projected plane-to-plane or point-to-plane distance. Always "
+                "prefer this over visual inspection for precision-sensitive decisions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "entityAId": {"type": "string", "description": "Deterministic ID of entity A"},
+                    "entityBId": {"type": "string", "description": "Deterministic ID of entity B"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "entityAId", "entityBId"],
+            },
+        ),
+        Tool(
+            name="get_mass_properties",
+            description=(
+                "Mass properties (volume, mass, center of mass, principal inertia, bbox) "
+                "for every body in a Part Studio, or a specific part if partId is given. "
+                "Values come as [min, mean, max] uncertainty triples. Mass is zero unless "
+                "a material is assigned; volume and centroid are always meaningful."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "partId": {
+                        "type": "string",
+                        "description": "Optional specific part ID. Omit for all parts.",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
@@ -3004,6 +3052,42 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"list_entities failed: {e}")]
+
+    elif name == "measure":
+        try:
+            result = await measurement_manager.measure(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                entity_a_id=arguments["entityAId"],
+                entity_b_id=arguments["entityBId"],
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"measure failed: HTTP {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"measure failed: {e}")]
+
+    elif name == "get_mass_properties":
+        try:
+            if arguments.get("partId"):
+                result = await measurement_manager.mass_properties_part(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                    part_id=arguments["partId"],
+                )
+            else:
+                result = await measurement_manager.mass_properties_part_studio(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                )
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=f"get_mass_properties failed: HTTP {e.response.status_code}.")]
+        except Exception as e:
+            return [TextContent(type="text", text=f"get_mass_properties failed: {e}")]
 
     elif name == "list_cached_images":
         entries = list_cached_image_ids()
