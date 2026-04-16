@@ -114,17 +114,17 @@ async def list_tools() -> list[Tool]:
                     },
                     "corner1": {
                         "type": "array",
-                        "items": {"type": "number"},
+                        "items": {"type": ["number", "string"]},
                         "minItems": 2,
                         "maxItems": 2,
-                        "description": "First corner [x, y] in inches",
+                        "description": "First corner [x, y]. Bare numbers are mm; use strings like \"10 mm\" or \"0.5 in\" for explicit units.",
                     },
                     "corner2": {
                         "type": "array",
-                        "items": {"type": "number"},
+                        "items": {"type": ["number", "string"]},
                         "minItems": 2,
                         "maxItems": 2,
-                        "description": "Second corner [x, y] in inches",
+                        "description": "Opposite corner [x, y]. Same convention as corner1.",
                     },
                     "variableWidth": {
                         "type": "string",
@@ -149,7 +149,10 @@ async def list_tools() -> list[Tool]:
                     "elementId": {"type": "string", "description": "Part Studio element ID"},
                     "name": {"type": "string", "description": "Extrude name", "default": "Extrude"},
                     "sketchFeatureId": {"type": "string", "description": "ID of sketch to extrude"},
-                    "depth": {"type": "number", "description": "Extrude depth in inches"},
+                    "depth": {
+                        "type": ["number", "string"],
+                        "description": "Extrude depth. Bare numbers are mm (CAD default); use \"15 mm\", \"0.5 in\", \"0.03 m\" etc. for explicit units.",
+                    },
                     "variableDepth": {
                         "type": "string",
                         "description": "Optional variable name for depth",
@@ -186,7 +189,10 @@ async def list_tools() -> list[Tool]:
                     "elementId": {"type": "string", "description": "Part Studio element ID"},
                     "name": {"type": "string", "description": "Thicken name", "default": "Thicken"},
                     "sketchFeatureId": {"type": "string", "description": "ID of sketch to thicken"},
-                    "thickness": {"type": "number", "description": "Thickness in inches"},
+                    "thickness": {
+                        "type": ["number", "string"],
+                        "description": "Thickness. Bare numbers are mm; use \"0.25 in\" / \"6 mm\" for explicit units.",
+                    },
                     "variableThickness": {
                         "type": "string",
                         "description": "Optional variable name for thickness",
@@ -730,9 +736,16 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
-                    "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
-                    "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
-                    "radius": {"type": "number", "description": "Radius in inches"},
+                    "center": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Center point [x, y]. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units. Preferred over centerX/centerY.",
+                    },
+                    "centerX": {"type": ["number", "string"], "description": "Center X (bare=mm). Legacy; prefer `center`.", "default": 0},
+                    "centerY": {"type": ["number", "string"], "description": "Center Y (bare=mm). Legacy; prefer `center`.", "default": 0},
+                    "radius": {"type": ["number", "string"], "description": "Radius. Bare=mm; use \"5 mm\" / \"0.125 in\" for explicit units."},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "radius"],
             },
@@ -762,17 +775,17 @@ async def list_tools() -> list[Tool]:
                     },
                     "startPoint": {
                         "type": "array",
-                        "items": {"type": "number"},
+                        "items": {"type": ["number", "string"]},
                         "minItems": 2,
                         "maxItems": 2,
-                        "description": "Start point [x, y] in inches",
+                        "description": "Start point [x, y]. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units.",
                     },
                     "endPoint": {
                         "type": "array",
-                        "items": {"type": "number"},
+                        "items": {"type": ["number", "string"]},
                         "minItems": 2,
                         "maxItems": 2,
-                        "description": "End point [x, y] in inches",
+                        "description": "End point [x, y]. Same convention as startPoint.",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "startPoint", "endPoint"],
@@ -801,9 +814,16 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Deterministic ID of an existing face to sketch on (get from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
                     },
-                    "centerX": {"type": "number", "description": "Center X in inches", "default": 0},
-                    "centerY": {"type": "number", "description": "Center Y in inches", "default": 0},
-                    "radius": {"type": "number", "description": "Radius in inches"},
+                    "center": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Center point [x, y]. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units. Preferred over centerX/centerY.",
+                    },
+                    "centerX": {"type": ["number", "string"], "description": "Center X (bare=mm). Legacy; prefer `center`.", "default": 0},
+                    "centerY": {"type": ["number", "string"], "description": "Center Y (bare=mm). Legacy; prefer `center`.", "default": 0},
+                    "radius": {"type": ["number", "string"], "description": "Radius. Bare=mm; use \"5 mm\" / \"0.125 in\" for explicit units."},
                     "startAngle": {
                         "type": "number",
                         "description": "Start angle in degrees (0 = positive X)",
@@ -829,7 +849,10 @@ async def list_tools() -> list[Tool]:
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
                     "elementId": {"type": "string", "description": "Part Studio element ID"},
                     "name": {"type": "string", "description": "Fillet name", "default": "Fillet"},
-                    "radius": {"type": "number", "description": "Fillet radius in inches"},
+                    "radius": {
+                        "type": ["number", "string"],
+                        "description": "Fillet radius. Bare numbers are mm (CAD default); use \"2 mm\" / \"0.125 in\" for explicit units.",
+                    },
                     "edgeIds": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -850,7 +873,10 @@ async def list_tools() -> list[Tool]:
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
                     "elementId": {"type": "string", "description": "Part Studio element ID"},
                     "name": {"type": "string", "description": "Chamfer name", "default": "Chamfer"},
-                    "distance": {"type": "number", "description": "Chamfer distance in inches"},
+                    "distance": {
+                        "type": ["number", "string"],
+                        "description": "Chamfer distance. Bare numbers are mm; use \"2 mm\" / \"0.125 in\" for explicit units.",
+                    },
                     "edgeIds": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -904,7 +930,10 @@ async def list_tools() -> list[Tool]:
                         "items": {"type": "string"},
                         "description": "Feature IDs to pattern",
                     },
-                    "distance": {"type": "number", "description": "Distance between instances in inches"},
+                    "distance": {
+                        "type": ["number", "string"],
+                        "description": "Distance between pattern instances. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units.",
+                    },
                     "count": {"type": "integer", "description": "Total number of instances", "default": 2},
                     "direction": {
                         "type": "string",
@@ -2692,8 +2721,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         try:
             plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
             sketch = SketchBuilder(name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id)
+            # Accept center=[x,y] (preferred, matches rectangle) or legacy centerX/centerY.
+            if "center" in arguments and arguments["center"] is not None:
+                cx, cy = arguments["center"][0], arguments["center"][1]
+            else:
+                cx = arguments.get("centerX", 0)
+                cy = arguments.get("centerY", 0)
             sketch.add_arc(
-                center=(arguments.get("centerX", 0), arguments.get("centerY", 0)),
+                center=(cx, cy),
                 radius=arguments["radius"],
                 start_angle=arguments.get("startAngle", 0),
                 end_angle=arguments.get("endAngle", 180),
