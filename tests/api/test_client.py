@@ -101,6 +101,35 @@ class TestOnshapeClient:
         assert call_args.kwargs["params"] == params
 
     @pytest.mark.asyncio
+    async def test_get_raw_returns_bytes_and_follows_redirects(
+        self, onshape_client, mock_httpx_client
+    ):
+        """get_raw should return response.content (bytes) and follow redirects by default."""
+        mock_response = Mock()
+        mock_response.content = b"ISO-10303-21;\nHEADER;\nENDSEC;"
+        mock_response.raise_for_status.return_value = None
+        mock_httpx_client.get.return_value = mock_response
+
+        data = await onshape_client.get_raw("/api/v6/documents/d/abc/externaldata/fid")
+
+        assert data.startswith(b"ISO-10303-21")
+        call_kwargs = mock_httpx_client.get.call_args.kwargs
+        assert call_kwargs["follow_redirects"] is True
+        assert "Authorization" in call_kwargs["headers"]
+
+    @pytest.mark.asyncio
+    async def test_get_raw_http_error(self, onshape_client, mock_httpx_client):
+        """get_raw should raise on non-2xx response."""
+        mock_response = Mock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=Mock(), response=Mock(status_code=404)
+        )
+        mock_httpx_client.get.return_value = mock_response
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await onshape_client.get_raw("/api/v6/missing")
+
+    @pytest.mark.asyncio
     async def test_get_request_http_error(self, onshape_client, mock_httpx_client):
         """Test GET request handling HTTP errors."""
         mock_response = Mock()
