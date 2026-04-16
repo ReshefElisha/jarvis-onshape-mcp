@@ -917,7 +917,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_linear_pattern",
-            description="Create a linear pattern of features",
+            description=(
+                "Create a linear pattern of features. Requires a deterministic edge id "
+                "whose direction the pattern will follow — Onshape has no implicit "
+                "world-X axis usable here. Workflow: create a reference (a sketch line "
+                "on any plane pointing the direction you want, or pick an existing body "
+                "edge via list_entities), then pass its id as directionEdgeId."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -935,14 +941,20 @@ async def list_tools() -> list[Tool]:
                         "description": "Distance between pattern instances. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units.",
                     },
                     "count": {"type": "integer", "description": "Total number of instances", "default": 2},
-                    "direction": {
+                    "directionEdgeId": {
                         "type": "string",
-                        "enum": ["X", "Y", "Z"],
-                        "description": "Pattern direction axis",
-                        "default": "X",
+                        "description": (
+                            "Deterministic id of an edge whose direction the pattern "
+                            "follows. Get from list_entities(kinds=['edges']) on an "
+                            "existing body, or from a sketch line you drew specifically "
+                            "as a reference. Required."
+                        ),
                     },
                 },
-                "required": ["documentId", "workspaceId", "elementId", "featureIds", "distance"],
+                "required": [
+                    "documentId", "workspaceId", "elementId",
+                    "featureIds", "distance", "directionEdgeId",
+                ],
             },
         ),
         Tool(
@@ -2822,10 +2834,15 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 name=arguments.get("name", "Linear pattern"),
                 distance=arguments["distance"],
                 count=arguments.get("count", 2),
+                direction_edge_id=arguments["directionEdgeId"],
             )
             for fid in arguments["featureIds"]:
                 pattern.add_feature(fid)
-            pattern.set_direction(arguments.get("direction", "X"))
+            # Legacy `direction` axis still accepted but ignored in favor of the
+            # real edge reference; pattern.set_direction is a no-op at build time
+            # once direction_edge_id is set.
+            if arguments.get("direction"):
+                pattern.set_direction(arguments["direction"])
             result = await apply_feature_and_check(
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],

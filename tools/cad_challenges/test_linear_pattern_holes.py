@@ -78,6 +78,26 @@ from test_pillow_block import (  # noqa: E402  -- units convention: bare numbers
 PREDICTED_FINAL_MM3 = 80 * 40 * 5 - 4 * math.pi * 3**2 * 5
 
 
+def _edge_along_x(ctx) -> str:
+    """Pick a deterministic edge id pointing along +X/-X from the cached
+    snapshot. Requires a preceding inspect/assert step to populate the cache.
+    """
+    snap = ctx._snapshot_cache
+    if snap is None:
+        raise RuntimeError("_edge_along_x requires a preceding inspect/assert step")
+    bodies = snap["raw"]["entities"].get("bodies") or []
+    if not bodies:
+        raise RuntimeError("_edge_along_x: no bodies yet")
+    x_edges = [
+        e for e in bodies[0].get("edges") or []
+        if e.get("type") == "LINE" and e.get("direction_axis") in ("+X", "-X")
+    ]
+    if not x_edges:
+        raise RuntimeError("_edge_along_x: no +X/-X line edges found")
+    # Pick any of them; the pattern direction is set by the edge, not its sign.
+    return x_edges[0]["id"]
+
+
 TEST = CadTest(
     name="linear_pattern_holes",
     brief=(
@@ -115,13 +135,16 @@ TEST = CadTest(
         assert_state("seed hole present", require_cylinder_count(1, 3.0, "seed hole")),
         inspect("after_seed_cut"),
 
-        # 3. Linear pattern x4 along +X with 20 mm spacing.
+        # 3. Linear pattern x4 along +X with 20 mm spacing. Pick an edge
+        # pointing +X: the base plate's top face has 4 LINE edges; the
+        # longer +X/-X ones are 80 mm, the +Y/-Y ones are 40 mm. Grab the
+        # first 80 mm line and use its deterministic id.
         build("pattern", "create_linear_pattern", lambda ctx: {
             "name": "hole pattern",
             "featureIds": [ctx.feature_ids["seed hole cut"]],
             "distance": 20,
             "count": 4,
-            "direction": "X",
+            "directionEdgeId": _edge_along_x(ctx),
         }),
         assert_state(
             "four-hole row",

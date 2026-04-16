@@ -71,7 +71,7 @@ class TestLinearPatternBuilder:
             lp.build()
 
     def test_build_structure(self):
-        lp = LinearPatternBuilder(name="TestLP")
+        lp = LinearPatternBuilder(name="TestLP", direction_edge_id="EDGE1")
         lp.add_feature("feat1")
         result = lp.build()
 
@@ -82,7 +82,7 @@ class TestLinearPatternBuilder:
         assert feature["name"] == "TestLP"
 
     def test_build_entities_parameter(self):
-        lp = LinearPatternBuilder()
+        lp = LinearPatternBuilder(direction_edge_id="EDGE1")
         lp.add_feature("f1").add_feature("f2")
         result = lp.build()
         params = result["feature"]["parameters"]
@@ -90,18 +90,31 @@ class TestLinearPatternBuilder:
         entities = next(p for p in params if p["parameterId"] == "entities")
         assert entities["queries"][0]["deterministicIds"] == ["f1", "f2"]
 
-    def test_build_direction_mapping(self):
-        for axis, expected in [("X", "RIGHT"), ("Y", "TOP"), ("Z", "FRONT")]:
-            lp = LinearPatternBuilder()
-            lp.add_feature("f1").set_direction(axis)
-            result = lp.build()
-            params = result["feature"]["parameters"]
-            dir_param = next(p for p in params if p["parameterId"] == "directionQuery")
-            assert expected in dir_param["queries"][0]["queryString"]
+    def test_build_direction_uses_edge_id(self):
+        lp = LinearPatternBuilder(direction_edge_id="JHl")
+        lp.add_feature("f1")
+        result = lp.build()
+        params = result["feature"]["parameters"]
+        dir_param = next(p for p in params if p["parameterId"] == "directionQuery")
+        assert dir_param["queries"][0]["deterministicIds"] == ["JHl"]
+
+    def test_build_without_direction_edge_raises(self):
+        lp = LinearPatternBuilder()  # no direction_edge_id
+        lp.add_feature("f1")
+        with pytest.raises(ValueError, match="direction_edge_id"):
+            lp.build()
+
+    def test_set_direction_edge_wins(self):
+        lp = LinearPatternBuilder()
+        lp.add_feature("f1").set_direction_edge("JHl")
+        result = lp.build()
+        params = result["feature"]["parameters"]
+        dir_param = next(p for p in params if p["parameterId"] == "directionQuery")
+        assert dir_param["queries"][0]["deterministicIds"] == ["JHl"]
 
     def test_build_distance_without_variable(self):
         """Bare numbers default to mm; value is meters."""
-        lp = LinearPatternBuilder(distance=2.5)
+        lp = LinearPatternBuilder(distance=2.5, direction_edge_id="EDGE1")
         lp.add_feature("f1")
         result = lp.build()
         params = result["feature"]["parameters"]
@@ -111,7 +124,7 @@ class TestLinearPatternBuilder:
         assert dist["value"] == pytest.approx(0.0025)
 
     def test_build_distance_with_unit_string(self):
-        lp = LinearPatternBuilder(distance="30 mm")
+        lp = LinearPatternBuilder(distance="30 mm", direction_edge_id="EDGE1")
         lp.add_feature("f1")
         result = lp.build()
         params = result["feature"]["parameters"]
@@ -121,7 +134,7 @@ class TestLinearPatternBuilder:
         assert dist["value"] == pytest.approx(0.030)
 
     def test_build_distance_with_variable(self):
-        lp = LinearPatternBuilder()
+        lp = LinearPatternBuilder(direction_edge_id="EDGE1")
         lp.set_distance(2.0, variable_name="d")
         lp.add_feature("f1")
         result = lp.build()
@@ -131,7 +144,7 @@ class TestLinearPatternBuilder:
         assert dist["expression"] == "#d"
 
     def test_build_count_parameter(self):
-        lp = LinearPatternBuilder(count=5)
+        lp = LinearPatternBuilder(count=5, direction_edge_id="EDGE1")
         lp.add_feature("f1")
         result = lp.build()
         params = result["feature"]["parameters"]
@@ -142,7 +155,7 @@ class TestLinearPatternBuilder:
         assert count_param["expression"] == "5"
 
     def test_build_pattern_type_is_feature(self):
-        lp = LinearPatternBuilder()
+        lp = LinearPatternBuilder(direction_edge_id="EDGE1")
         lp.add_feature("f1")
         result = lp.build()
         params = result["feature"]["parameters"]
