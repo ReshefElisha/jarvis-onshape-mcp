@@ -499,3 +499,22 @@ class TestDocumentManager:
             await document_manager.create_document(name="Failed Document")
 
         assert "API Error" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_delete_document_hits_v10_path(self, document_manager, onshape_client):
+        """delete_document should DELETE /api/v10/documents/{did}."""
+        onshape_client.delete = AsyncMock(return_value={})
+
+        result = await document_manager.delete_document("doc_abc")
+
+        assert result == {}
+        onshape_client.delete.assert_awaited_once()
+        path = onshape_client.delete.await_args[0][0]
+        assert path == "/api/v10/documents/doc_abc"
+
+    @pytest.mark.asyncio
+    async def test_delete_document_propagates_errors(self, document_manager, onshape_client):
+        onshape_client.delete = AsyncMock(side_effect=Exception("403 Forbidden"))
+        with pytest.raises(Exception) as exc_info:
+            await document_manager.delete_document("doc_abc")
+        assert "Forbidden" in str(exc_info.value)

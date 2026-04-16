@@ -311,6 +311,21 @@ class DocumentManager:
             thumbnail=thumbnail_url,
         )
 
+    async def delete_document(self, document_id: str) -> Dict[str, Any]:
+        """Delete (trash) a document.
+
+        Onshape treats document deletion as moving to the user's trash; the
+        operation is DELETE /api/v10/documents/{did}. Non-empty responses are
+        rare here, but we return whatever the API gives us.
+
+        Args:
+            document_id: Document ID
+
+        Returns:
+            Raw API response (often empty on success).
+        """
+        return await self.client.delete(f"/api/v10/documents/{document_id}")
+
     async def get_document_summary(self, document_id: str) -> Dict[str, Any]:
         """Get a comprehensive summary of a document including workspaces and elements.
 

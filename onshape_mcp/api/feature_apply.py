@@ -137,6 +137,115 @@ async def apply_feature_and_check(
     )
 
 
+async def update_feature_params_and_check(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    updates: List[Dict[str, Any]],
+) -> FeatureApplyResult:
+    """Patch a specific feature's parameters and report the real Onshape status.
+
+    Onshape does not have a granular parameter-patch endpoint; updates are done
+    by re-POSTing the whole feature to
+    `/api/v9/partstudios/.../features/featureid/{feature_id}`. This helper hides
+    that round-trip: it GETs the current /features list, finds the feature by
+    id, merges the caller's `updates` into the matching parameters by
+    `parameterId`, and POSTs the modified feature through
+    `apply_feature_and_check` so the same structured status comes out.
+
+    Args:
+        client: Active OnshapeClient.
+        document_id, workspace_id, element_id: Usual triple.
+        feature_id: Feature to patch.
+        updates: List of parameter patches. Each entry MUST include
+            `parameterId`. Any other keys are merged into the matching
+            parameter dict, overwriting. For BTMParameterQuantity-147 set
+            `expression` (e.g. `"15 mm"`, `"90 deg"`) and the helper clears the
+            stale numeric `value` so Onshape re-evaluates. For booleans / enums
+            (BTMParameterBoolean-144 / BTMParameterEnum-145) just set `value`.
+
+    Returns:
+        FeatureApplyResult with the post-update featureStatus. ok=False if the
+        feature errors after the patch (so Claude learns the tweak was wrong).
+
+    Raises:
+        ValueError: feature_id not found, or an `updates` entry has no
+            matching parameterId, or `updates` is empty — all of these are
+            programmer/driver errors, not API failures.
+    """
+    if not feature_id:
+        raise ValueError("feature_id is required")
+    if not updates:
+        raise ValueError("updates must be a non-empty list")
+
+    base = (
+        f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    features_doc = await client.get(base)
+    features: List[Dict[str, Any]] = features_doc.get("features", []) or []
+
+    target: Optional[Dict[str, Any]] = None
+    for feat in features:
+        if feat.get("featureId") == feature_id:
+            target = feat
+            break
+    if target is None:
+        raise ValueError(
+            f"feature_id {feature_id!r} not found in element. "
+            f"Available ids: {[f.get('featureId') for f in features]}"
+        )
+
+    params = target.get("parameters") or []
+    param_by_id: Dict[str, Dict[str, Any]] = {
+        p.get("parameterId"): p for p in params if isinstance(p, dict)
+    }
+
+    missing: List[str] = []
+    for upd in updates:
+        if not isinstance(upd, dict) or "parameterId" not in upd:
+            raise ValueError(
+                f"each update must be a dict with a 'parameterId' key, got {upd!r}"
+            )
+        pid = upd["parameterId"]
+        target_param = param_by_id.get(pid)
+        if target_param is None:
+            missing.append(pid)
+            continue
+        # Merge all other fields into the parameter dict.
+        for k, v in upd.items():
+            if k == "parameterId":
+                continue
+            target_param[k] = v
+        # For Quantity params: if caller set expression but didn't set value,
+        # clear the numeric value so Onshape re-evaluates the expression
+        # instead of preferring the stale numeric.
+        if (
+            target_param.get("btType") == "BTMParameterQuantity-147"
+            and "expression" in upd
+            and "value" not in upd
+        ):
+            target_param["value"] = 0.0
+
+    if missing:
+        existing = sorted(param_by_id.keys())
+        raise ValueError(
+            f"parameterId(s) not found on feature: {missing!r}. "
+            f"Feature has parameters: {existing}"
+        )
+
+    return await apply_feature_and_check(
+        client,
+        document_id,
+        workspace_id,
+        element_id,
+        {"feature": target},
+        operation="update",
+        feature_id=feature_id,
+    )
+
+
 def _extract_error_message(state: Dict[str, Any]) -> str:
     """Pull a useful error string out of a BTFeatureState blob.
 
