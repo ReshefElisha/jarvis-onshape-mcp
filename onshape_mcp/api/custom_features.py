@@ -77,7 +77,7 @@ class CustomFeatureManager:
         NOT cache — callers should cache themselves if they care.
         """
         versions = await self.client.get(
-            f"/api/versions/d/{_ONSHAPE_STD_DID}/versions"
+            f"/api/v9/documents/d/{_ONSHAPE_STD_DID}/versions"
         )
         if not isinstance(versions, list) or not versions:
             raise RuntimeError(
@@ -265,22 +265,18 @@ class CustomFeatureManager:
                 f"{specs.get('libraryVersion')!r}. Uploaded source preview: "
                 f"{feature_script[:200]!r}"
             )
-        # Pull microversion off the first spec entry. If the exported symbol
-        # name doesn't match feature_type, we find the right spec to pick its
-        # microversion from; otherwise any spec's microversion works (they
-        # all come from the same upload).
+        # Pick the spec whose exported `featureType` matches the caller's,
+        # else fall back to the first. BTFeatureSpec-129 keys live at the
+        # top level (featureType, sourceMicroversionId) — older probes
+        # expected a nested `message` dict but live responses put them
+        # top-level.
         target_spec = next(
-            (
-                s for s in feature_specs
-                if (s.get("message", {}) or s).get("featureType") == feature_type
-            ),
+            (s for s in feature_specs if s.get("featureType") == feature_type),
             feature_specs[0],
         )
-        # Microversion is nested under `message` on BTFeatureSpec-129.
-        msg = target_spec.get("message", target_spec) or {}
         source_microversion = (
-            msg.get("sourceMicroversionId")
-            or target_spec.get("sourceMicroversionId")
+            target_spec.get("sourceMicroversionId")
+            or upload_resp.get("sourceMicroversion")
             or upload_resp.get("microversionId")
         )
         if not source_microversion:

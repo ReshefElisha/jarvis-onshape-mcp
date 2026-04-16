@@ -36,6 +36,7 @@ from .api.feature_apply import (
 from .api.entities import EntityManager
 from .api.describe import DescribeManager
 from .api.measurements import MeasurementManager
+from .api.custom_features import CustomFeatureManager, DEFAULT_FS_VERSION
 from .api.rendering import (
     ShadedViewManager,
     crop_cached_image,
@@ -81,6 +82,7 @@ shaded_view_manager = ShadedViewManager(client)
 entity_manager = EntityManager(client)
 measurement_manager = MeasurementManager(client)
 describe_manager = DescribeManager(client)
+custom_feature_manager = CustomFeatureManager(client)
 
 
 @app.list_tools()
@@ -1424,6 +1426,80 @@ async def list_tools() -> list[Tool]:
                 "you've looked at so far."
             ),
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="write_featurescript_feature",
+            description=(
+                "Paradigm escape hatch. Author an arbitrary FeatureScript custom "
+                "feature (threads, helices, shells, drafts, sweeps along a path, "
+                "patterns along a curve -- anything our primitives can't express) "
+                "and apply it to a Part Studio in one call. The system creates a "
+                "Feature Studio element in the same workspace, uploads your source, "
+                "confirms it compiles, fetches the sourceMicroversionId, and "
+                "instantiates a BTMFeature-134 with the correct "
+                "`e{fs_eid}::m{microversion}` namespace.\n\n"
+                "`featureScript` is a COMPLETE FS source file. Prelude: "
+                "`FeatureScript 2909;\\nimport(path:\"onshape/std/geometry.fs\",version:\"2909.0\");`. "
+                "Export exactly one `defineFeature(...)` whose binding name matches "
+                "the `featureType` arg. Minimal worked example (offset plane):\n"
+                "```\n"
+                "FeatureScript 2909;\n"
+                "import(path:\"onshape/std/geometry.fs\",version:\"2909.0\");\n"
+                "annotation { \"Feature Type Name\" : \"My feat\" }\n"
+                "export const myFeat = defineFeature(function(context is Context, id is Id, definition is map)\n"
+                "    precondition { annotation{\"Name\":\"Offset\"} isLength(definition.offset, LENGTH_BOUNDS); }\n"
+                "    {\n"
+                "        opPlane(context, id + \"p\", {\"plane\": plane(vector(0,0,definition.offset), vector(0,0,1), vector(1,0,0))});\n"
+                "    });\n"
+                "```\n"
+                "`parameters` is a list of `{id, type, value}` dicts to bind "
+                "precondition variables. type ∈ {quantity, string, boolean, real}. "
+                "For quantity, value is a unit-tagged string like \"25 mm\" or \"0.5 in\"."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Target Part Studio element ID"},
+                    "featureType": {
+                        "type": "string",
+                        "description": "The exported defineFeature binding name. MUST match the `export const <name> = ...` in featureScript.",
+                    },
+                    "featureScript": {
+                        "type": "string",
+                        "description": "Complete FS source. Must start with `FeatureScript <N>;` where N is the current std library version (currently 2909).",
+                    },
+                    "featureName": {
+                        "type": "string",
+                        "description": "Human-readable name that shows up in the Onshape feature tree.",
+                    },
+                    "parameters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["quantity", "string", "boolean", "real"],
+                                },
+                                "value": {},
+                            },
+                            "required": ["id", "type"],
+                        },
+                        "description": "Bind precondition variables. Omit if the custom feature takes no inputs.",
+                    },
+                    "fsElementName": {
+                        "type": "string",
+                        "description": "Optional name for the Feature Studio element that carries the source. Defaults to ClaudeFS_<featureType>.",
+                    },
+                },
+                "required": [
+                    "documentId", "workspaceId", "elementId",
+                    "featureType", "featureScript", "featureName",
+                ],
+            },
         ),
     ]
 
@@ -3459,6 +3535,37 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 f"  - {e['image_id']}: view={view} source={src.get('kind','?')}:{src.get('eid','?')} {dims} {e['bytes']}B{crop_note}"
             )
         return [TextContent(type="text", text="\n".join(lines))]
+
+    elif name == "write_featurescript_feature":
+        try:
+            out = await custom_feature_manager.apply_featurescript_feature(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                part_studio_element_id=arguments["elementId"],
+                feature_type=arguments["featureType"],
+                feature_script=arguments["featureScript"],
+                feature_name=arguments["featureName"],
+                parameters=arguments.get("parameters"),
+                fs_element_name=arguments.get("fsElementName"),
+            )
+            apply = out["apply_result"]
+            payload = {
+                "ok": apply.ok,
+                "status": apply.status,
+                "feature_id": apply.feature_id,
+                "feature_type": apply.feature_type,
+                "feature_name": apply.feature_name,
+                "error_message": apply.error_message,
+                "fs_element_id": out["fs_element_id"],
+                "source_microversion_id": out.get("source_microversion_id"),
+                "tool": "write_featurescript_feature",
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("write_featurescript_feature failed")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     else:
         raise ValueError(f"Unknown tool: {name}")
