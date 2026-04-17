@@ -10,9 +10,70 @@ from unittest.mock import AsyncMock
 import pytest
 
 from onshape_mcp.api.feature_apply import (
+    apply_assembly_feature_and_check,
     update_feature_params_and_check,
     FeatureApplyResult,
 )
+
+
+class TestApplyAssemblyFeatureAndCheck:
+    """Pin the contract of the assembly-side wire-truth helper."""
+
+    @pytest.mark.asyncio
+    async def test_posts_to_assemblies_path(self, onshape_client):
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "f1", "name": "MC", "featureType": "mateConnector"},
+            "featureState": {"featureStatus": "OK"},
+        })
+        result = await apply_assembly_feature_and_check(
+            onshape_client, "docA", "wsA", "asmA", {"feature": {}},
+        )
+        assert isinstance(result, FeatureApplyResult)
+        assert result.ok is True
+        assert result.status == "OK"
+        assert result.feature_id == "f1"
+        assert result.feature_type == "mateConnector"
+        # Path targets the assemblies endpoint.
+        posted_path = onshape_client.post.await_args[0][0]
+        assert "/api/v9/assemblies/d/docA/w/wsA/e/asmA/features" in posted_path
+
+    @pytest.mark.asyncio
+    async def test_error_status_surfaces_as_ok_false(self, onshape_client):
+        """Onshape-reported featureStatus=ERROR becomes ok=False with message."""
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "badMate", "name": "m", "featureType": "mate"},
+            "featureState": {
+                "featureStatus": "ERROR",
+                "message": "Solver rejected: over-constrained",
+            },
+        })
+        result = await apply_assembly_feature_and_check(
+            onshape_client, "d", "w", "e", {"feature": {}},
+        )
+        assert result.ok is False
+        assert result.status == "ERROR"
+        assert "over-constrained" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_update_operation_uses_featureid_path(self, onshape_client):
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "fixed"},
+            "featureState": {"featureStatus": "OK"},
+        })
+        await apply_assembly_feature_and_check(
+            onshape_client, "d", "w", "e", {"feature": {}},
+            operation="update", feature_id="fixed",
+        )
+        posted_path = onshape_client.post.await_args[0][0]
+        assert posted_path.endswith("/features/featureid/fixed")
+
+    @pytest.mark.asyncio
+    async def test_update_without_feature_id_rejects(self, onshape_client):
+        with pytest.raises(ValueError):
+            await apply_assembly_feature_and_check(
+                onshape_client, "d", "w", "e", {"feature": {}},
+                operation="update",
+            )
 
 
 def _extrude_feature(

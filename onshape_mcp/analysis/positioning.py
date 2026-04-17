@@ -1,35 +1,41 @@
 """Assembly positioning tools for absolute placement and face alignment."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 from loguru import logger
 
-from .interference import BoundingBox, METERS_TO_INCHES, get_world_aabb
+from .interference import BoundingBox, get_world_aabb
+from ..builders._units import parse_length
 
-INCHES_TO_METERS = 0.0254
+METERS_TO_MM = 1000.0
 
 FACE_NAMES = {"front", "back", "left", "right", "top", "bottom"}
+
+LengthLike = Union[float, int, str]
 
 
 @dataclass
 class InstancePositionInfo:
-    """Position and extent information for a single assembly instance."""
+    """Position and extent information for a single assembly instance.
+
+    All fields in millimeters (the post-[units-asm] convention).
+    """
 
     name: str
     instance_id: str
-    position_x_inches: float
-    position_y_inches: float
-    position_z_inches: float
-    size_x_inches: float
-    size_y_inches: float
-    size_z_inches: float
-    world_low_x_inches: float
-    world_low_y_inches: float
-    world_low_z_inches: float
-    world_high_x_inches: float
-    world_high_y_inches: float
-    world_high_z_inches: float
+    position_x_mm: float
+    position_y_mm: float
+    position_z_mm: float
+    size_x_mm: float
+    size_y_mm: float
+    size_z_mm: float
+    world_low_x_mm: float
+    world_low_y_mm: float
+    world_low_z_mm: float
+    world_high_x_mm: float
+    world_high_y_mm: float
+    world_high_z_mm: float
 
 
 def extract_occurrence_transforms(
@@ -72,22 +78,26 @@ def get_position_from_transform(
 
 
 def build_absolute_translation_matrix(
-    x_inches: float, y_inches: float, z_inches: float
+    x: LengthLike, y: LengthLike, z: LengthLike
 ) -> List[float]:
     """Build a 4x4 identity-rotation matrix with given translation.
 
     Args:
-        x_inches: X position in inches
-        y_inches: Y position in inches
-        z_inches: Z position in inches
+        x: X position. Bare numbers = mm; strings like "20 mm" / "0.5 in"
+            carry explicit units.
+        y: Y position, same convention.
+        z: Z position, same convention.
 
     Returns:
-        16-element row-major 4x4 matrix
+        16-element row-major 4x4 matrix (in meters, as Onshape expects).
     """
+    x_m = parse_length(x).meters
+    y_m = parse_length(y).meters
+    z_m = parse_length(z).meters
     return [
-        1.0, 0.0, 0.0, x_inches * INCHES_TO_METERS,
-        0.0, 1.0, 0.0, y_inches * INCHES_TO_METERS,
-        0.0, 0.0, 1.0, z_inches * INCHES_TO_METERS,
+        1.0, 0.0, 0.0, x_m,
+        0.0, 1.0, 0.0, y_m,
+        0.0, 0.0, 1.0, z_m,
         0.0, 0.0, 0.0, 1.0,
     ]
 
@@ -162,20 +172,20 @@ def format_positions_report(positions: List[InstancePositionInfo]) -> str:
     for p in positions:
         lines.append(f"**{p.name}** (ID: {p.instance_id})")
         lines.append(
-            f'  Position: X={p.position_x_inches:.3f}", '
-            f'Y={p.position_y_inches:.3f}", '
-            f'Z={p.position_z_inches:.3f}"'
+            f"  Position: X={p.position_x_mm:.2f} mm, "
+            f"Y={p.position_y_mm:.2f} mm, "
+            f"Z={p.position_z_mm:.2f} mm"
         )
         lines.append(
-            f'  Size: {p.size_x_inches:.3f}" W x '
-            f'{p.size_y_inches:.3f}" D x '
-            f'{p.size_z_inches:.3f}" H'
+            f"  Size: {p.size_x_mm:.2f} mm W x "
+            f"{p.size_y_mm:.2f} mm D x "
+            f"{p.size_z_mm:.2f} mm H"
         )
         lines.append(
             f"  World bounds: "
-            f'X=[{p.world_low_x_inches:.3f}", {p.world_high_x_inches:.3f}"], '
-            f'Y=[{p.world_low_y_inches:.3f}", {p.world_high_y_inches:.3f}"], '
-            f'Z=[{p.world_low_z_inches:.3f}", {p.world_high_z_inches:.3f}"]'
+            f"X=[{p.world_low_x_mm:.2f}, {p.world_high_x_mm:.2f}] mm, "
+            f"Y=[{p.world_low_y_mm:.2f}, {p.world_high_y_mm:.2f}] mm, "
+            f"Z=[{p.world_low_z_mm:.2f}, {p.world_high_z_mm:.2f}] mm"
         )
         lines.append("")
 
@@ -250,18 +260,18 @@ async def get_assembly_positions(
             InstancePositionInfo(
                 name=inst.get("name", "Unnamed"),
                 instance_id=inst["id"],
-                position_x_inches=pos_meters[0] * METERS_TO_INCHES,
-                position_y_inches=pos_meters[1] * METERS_TO_INCHES,
-                position_z_inches=pos_meters[2] * METERS_TO_INCHES,
-                size_x_inches=(world_bbox.high_x - world_bbox.low_x) * METERS_TO_INCHES,
-                size_y_inches=(world_bbox.high_y - world_bbox.low_y) * METERS_TO_INCHES,
-                size_z_inches=(world_bbox.high_z - world_bbox.low_z) * METERS_TO_INCHES,
-                world_low_x_inches=world_bbox.low_x * METERS_TO_INCHES,
-                world_low_y_inches=world_bbox.low_y * METERS_TO_INCHES,
-                world_low_z_inches=world_bbox.low_z * METERS_TO_INCHES,
-                world_high_x_inches=world_bbox.high_x * METERS_TO_INCHES,
-                world_high_y_inches=world_bbox.high_y * METERS_TO_INCHES,
-                world_high_z_inches=world_bbox.high_z * METERS_TO_INCHES,
+                position_x_mm=pos_meters[0] * METERS_TO_MM,
+                position_y_mm=pos_meters[1] * METERS_TO_MM,
+                position_z_mm=pos_meters[2] * METERS_TO_MM,
+                size_x_mm=(world_bbox.high_x - world_bbox.low_x) * METERS_TO_MM,
+                size_y_mm=(world_bbox.high_y - world_bbox.low_y) * METERS_TO_MM,
+                size_z_mm=(world_bbox.high_z - world_bbox.low_z) * METERS_TO_MM,
+                world_low_x_mm=world_bbox.low_x * METERS_TO_MM,
+                world_low_y_mm=world_bbox.low_y * METERS_TO_MM,
+                world_low_z_mm=world_bbox.low_z * METERS_TO_MM,
+                world_high_x_mm=world_bbox.high_x * METERS_TO_MM,
+                world_high_y_mm=world_bbox.high_y * METERS_TO_MM,
+                world_high_z_mm=world_bbox.high_z * METERS_TO_MM,
             )
         )
 
@@ -274,34 +284,39 @@ async def set_absolute_position(
     workspace_id: str,
     element_id: str,
     instance_id: str,
-    x_inches: float,
-    y_inches: float,
-    z_inches: float,
-) -> str:
+    x: LengthLike,
+    y: LengthLike,
+    z: LengthLike,
+) -> Tuple[str, Tuple[float, float, float]]:
     """Set an instance to an absolute position.
 
     Args:
         assembly_manager: AssemblyManager instance
-        document_id: Document ID
-        workspace_id: Workspace ID
-        element_id: Assembly element ID
-        instance_id: Instance to position
-        x_inches: Absolute X position in inches
-        y_inches: Absolute Y position in inches
-        z_inches: Absolute Z position in inches
+        document_id, workspace_id, element_id: Assembly triple.
+        instance_id: Instance to position.
+        x: Absolute X. Bare numbers = mm; strings like "20 mm" / "0.5 in"
+            carry explicit units.
+        y: Absolute Y, same convention.
+        z: Absolute Z, same convention.
 
     Returns:
-        Confirmation message string
+        (confirmation_message, (x_mm, y_mm, z_mm)) — the second element lets
+        the caller put resolved-mm values in a structured response without
+        re-parsing.
     """
-    transform = build_absolute_translation_matrix(x_inches, y_inches, z_inches)
+    transform = build_absolute_translation_matrix(x, y, z)
     occurrences = [{"path": [instance_id], "transform": transform}]
     await assembly_manager.transform_occurrences(
         document_id, workspace_id, element_id, occurrences, is_relative=False
     )
-    return (
+    x_mm = parse_length(x).meters * METERS_TO_MM
+    y_mm = parse_length(y).meters * METERS_TO_MM
+    z_mm = parse_length(z).meters * METERS_TO_MM
+    msg = (
         f"Set instance {instance_id} to absolute position: "
-        f'X={x_inches:.3f}", Y={y_inches:.3f}", Z={z_inches:.3f}"'
+        f"X={x_mm:.2f} mm, Y={y_mm:.2f} mm, Z={z_mm:.2f} mm"
     )
+    return msg, (x_mm, y_mm, z_mm)
 
 
 async def align_to_face(
@@ -397,12 +412,15 @@ async def align_to_face(
         source_local_bbox, source_current_pos, target_world_aabb, face
     )
 
-    new_x_in = new_pos_meters[0] * METERS_TO_INCHES
-    new_y_in = new_pos_meters[1] * METERS_TO_INCHES
-    new_z_in = new_pos_meters[2] * METERS_TO_INCHES
+    new_x_mm = new_pos_meters[0] * METERS_TO_MM
+    new_y_mm = new_pos_meters[1] * METERS_TO_MM
+    new_z_mm = new_pos_meters[2] * METERS_TO_MM
 
-    # Apply absolute transform
-    transform = build_absolute_translation_matrix(new_x_in, new_y_in, new_z_in)
+    # Apply absolute transform (pass mm strings so build_absolute_translation_matrix
+    # parses them via the units helper like any other caller).
+    transform = build_absolute_translation_matrix(
+        f"{new_x_mm} mm", f"{new_y_mm} mm", f"{new_z_mm} mm"
+    )
     occurrences = [{"path": [source_instance_id], "transform": transform}]
     await assembly_manager.transform_occurrences(
         document_id, workspace_id, element_id, occurrences, is_relative=False
@@ -411,5 +429,5 @@ async def align_to_face(
     return (
         f"Aligned '{source_inst.get('name', source_instance_id)}' to "
         f"'{face}' face of '{target_inst.get('name', target_instance_id)}'.\n"
-        f'New position: X={new_x_in:.3f}", Y={new_y_in:.3f}", Z={new_z_in:.3f}"'
+        f"New position: X={new_x_mm:.2f} mm, Y={new_y_mm:.2f} mm, Z={new_z_mm:.2f} mm"
     )

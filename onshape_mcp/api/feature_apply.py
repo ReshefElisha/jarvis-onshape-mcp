@@ -137,6 +137,85 @@ async def apply_feature_and_check(
     )
 
 
+async def apply_assembly_feature_and_check(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_payload: Dict[str, Any],
+    *,
+    operation: Literal["create", "update"] = "create",
+    feature_id: Optional[str] = None,
+) -> FeatureApplyResult:
+    """Apply a feature to an Assembly and return its Onshape-reported status.
+
+    Mirror of `apply_feature_and_check` that targets the assemblies endpoint
+    instead of partstudios. Mate connectors, mates (fastened / revolute /
+    slider / cylindrical), and any other assembly feature ride through this
+    helper so callers see `status=ERROR` when the solver rejects a mate,
+    instead of the silent "Created fastened mate 'foo'. Feature ID: bar"
+    prose the old path returned.
+
+    Response shape on the assembly side is identical to the PS side
+    (`{featureState, feature, ...}`) — verified via live probe — so the
+    same parsing works.
+    """
+    if operation == "update" and not feature_id:
+        raise ValueError("feature_id is required when operation='update'")
+    if operation not in {"create", "update"}:
+        raise ValueError(f"operation must be 'create' or 'update', got {operation!r}")
+
+    base = (
+        f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    path = base if operation == "create" else f"{base}/featureid/{feature_id}"
+
+    response = await client.post(path, data=feature_payload)
+
+    state = response.get("featureState") if isinstance(response, dict) else None
+    feature = response.get("feature", {}) if isinstance(response, dict) else {}
+
+    real_feature_id = feature.get("featureId") or feature_id or ""
+    feature_name = feature.get("name", "")
+    feature_type = feature.get("featureType") or feature.get("btType", "")
+
+    if not state:
+        # Fallback: re-read /features and pick this feature's state out of the
+        # map. Onshape has been reliable about including `featureState` inline
+        # on assembly POSTs, but the belt-and-suspenders path matches the PS
+        # helper and is cheap.
+        logger.warning(
+            "apply_assembly_feature_and_check: POST response missing featureState; "
+            "falling back to /features featureStates map"
+        )
+        try:
+            feats = await client.get(base)
+            state = (feats.get("featureStates") or {}).get(real_feature_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Fallback /features GET failed: {e}")
+            state = None
+
+    raw_status: str = (state or {}).get("featureStatus", "UNKNOWN")
+    status: FeatureStatus = (
+        raw_status if raw_status in ("OK", "INFO", "WARNING", "ERROR") else "UNKNOWN"
+    )
+    ok = status in ("OK", "INFO")
+
+    error_message: Optional[str] = None
+    if status != "OK":
+        error_message = _extract_error_message(state or {})
+
+    return FeatureApplyResult(
+        ok=ok,
+        status=status,
+        feature_id=real_feature_id,
+        feature_name=feature_name,
+        feature_type=feature_type,
+        error_message=error_message,
+        raw=response if isinstance(response, dict) else {},
+    )
+
+
 async def update_feature_params_and_check(
     client: OnshapeClient,
     document_id: str,

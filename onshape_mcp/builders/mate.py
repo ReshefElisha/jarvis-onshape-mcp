@@ -2,7 +2,12 @@
 
 import math
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+from ._units import parse_length
+
+
+LengthLike = Union[float, int, str]
 
 
 class MateType(Enum):
@@ -105,23 +110,30 @@ class MateConnectorBuilder:
         self._secondary_axis_type = axis_type
         return self
 
-    def set_translation(self, x: float, y: float, z: float) -> "MateConnectorBuilder":
-        """Set offset from face center in inches.
+    def set_translation(
+        self,
+        x: LengthLike,
+        y: LengthLike,
+        z: LengthLike,
+    ) -> "MateConnectorBuilder":
+        """Set offset from face center.
 
         Enables the transform parameters on the mate connector.
 
         Args:
-            x: X offset in inches
-            y: Y offset in inches
-            z: Z offset in inches
+            x: X offset. Bare number = mm; strings like "10 mm" / "0.5 in"
+                carry explicit units.
+            y: Y offset, same convention.
+            z: Z offset, same convention.
 
         Returns:
             Self for chaining
         """
         self._transform_enabled = True
-        self._translation_x = x
-        self._translation_y = y
-        self._translation_z = z
+        # Store in meters so build() can skip re-parsing.
+        self._translation_x = parse_length(x).meters
+        self._translation_y = parse_length(y).meters
+        self._translation_z = parse_length(z).meters
         return self
 
     def set_rotation(
@@ -192,9 +204,10 @@ class MateConnectorBuilder:
             })
 
         if self._transform_enabled:
-            tx_m = self._translation_x * 0.0254
-            ty_m = self._translation_y * 0.0254
-            tz_m = self._translation_z * 0.0254
+            # set_translation stored these in meters already.
+            tx_m = self._translation_x
+            ty_m = self._translation_y
+            tz_m = self._translation_z
             parameters.append({
                 "btType": "BTMParameterBoolean-144",
                 "parameterId": "transform",
@@ -293,15 +306,23 @@ class MateBuilder:
         self.second_mc_id = feature_id
         return self
 
-    def set_limits(self, min_value: float, max_value: float) -> "MateBuilder":
+    def set_limits(
+        self,
+        min_value: "LengthLike | float",
+        max_value: "LengthLike | float",
+    ) -> "MateBuilder":
         """Set motion limits for the mate.
 
-        For SLIDER/CYLINDRICAL mates: values are in inches (converted to meters).
-        For REVOLUTE mates: values are in degrees (converted to radians).
+        For SLIDER / CYLINDRICAL mates: values are LENGTHS. Bare numbers are
+            mm (matches the new-forward units convention); strings like
+            "10 mm" / "0.5 in" carry explicit units.
+        For REVOLUTE mates: values are ANGLES in degrees (float only; no
+            length parsing — "deg" strings are rejected by the build step).
 
         Args:
-            min_value: Minimum travel (inches for slider, degrees for revolute)
-            max_value: Maximum travel (inches for slider, degrees for revolute)
+            min_value: Minimum travel (length for slider/cylindrical; degrees
+                for revolute).
+            max_value: Maximum travel.
 
         Returns:
             Self for chaining
@@ -359,8 +380,8 @@ class MateBuilder:
                 "value": True,
             })
             if self.mate_type in (MateType.SLIDER, MateType.CYLINDRICAL):
-                min_m = self.min_limit * 0.0254
-                max_m = self.max_limit * 0.0254
+                min_m = parse_length(self.min_limit).meters
+                max_m = parse_length(self.max_limit).meters
                 params.append({
                     "btType": "BTMParameterNullableQuantity-807",
                     "parameterId": "limitZMin",
@@ -397,23 +418,23 @@ class MateBuilder:
 
 
 def build_transform_matrix(
-    tx: float = 0.0,
-    ty: float = 0.0,
-    tz: float = 0.0,
+    tx: LengthLike = 0.0,
+    ty: LengthLike = 0.0,
+    tz: LengthLike = 0.0,
     rx: float = 0.0,
     ry: float = 0.0,
     rz: float = 0.0,
 ) -> List[float]:
     """Build a 4x4 transformation matrix (row-major, 16 elements).
 
-    Translation values are in inches (converted to meters).
-    Rotation values are in degrees (converted to radians).
-    Rotation order is Rz * Ry * Rx.
+    Translations are lengths: bare numbers are mm (CAD default); strings like
+    "10 mm" / "0.5 in" / "0.03 m" carry explicit units. Rotations are degrees
+    (float). Rotation order is Rz * Ry * Rx.
 
     Args:
-        tx: X translation in inches
-        ty: Y translation in inches
-        tz: Z translation in inches
+        tx: X translation. Bare = mm; strings with unit suffix respected.
+        ty: Y translation, same convention.
+        tz: Z translation, same convention.
         rx: X rotation in degrees
         ry: Y rotation in degrees
         rz: Z rotation in degrees
@@ -421,10 +442,9 @@ def build_transform_matrix(
     Returns:
         16-element list representing the 4x4 transformation matrix
     """
-    # Convert inches to meters
-    tx_m = tx * 0.0254
-    ty_m = ty * 0.0254
-    tz_m = tz * 0.0254
+    tx_m = parse_length(tx).meters
+    ty_m = parse_length(ty).meters
+    tz_m = parse_length(tz).meters
 
     # Convert degrees to radians
     rx_r = math.radians(rx)
