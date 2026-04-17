@@ -1827,12 +1827,62 @@ def _format_export_result(result, element_id: str) -> str:
     )
 
 
+def _hints_for_result(result: FeatureApplyResult) -> list[str]:
+    """Pick the `hints` list to attach to a tool response based on its status.
+
+    Nudges Claude toward the next reflex: inspect what just happened, or
+    recover from a failure, or notice when an FS custom feature would be
+    cleaner than another layer of primitives. Keep each hint short and
+    actionable; the downstream LLM reads these every turn.
+
+    Rotation policy:
+      - OK / INFO   -> next-step reflex: describe + mention write_featurescript_feature.
+      - WARNING     -> read error_message, check VS for missing vars.
+      - ERROR       -> update_feature or delete_feature_by_name + retry.
+      - EXCEPTION   -> handled in `_exception_json`, not here.
+      - UNKNOWN     -> conservative: suggest describe_part_studio to learn state.
+    """
+    status = result.status
+    if status in ("OK", "INFO"):
+        return [
+            "To see what changed, call describe_part_studio — the PHYSICAL "
+            "SUMMARY + changes block show new topology at a glance.",
+            "Doing the same 3-feature pattern twice? write_featurescript_feature "
+            "can encapsulate it as a reusable op. See SKILL.md -> When to write "
+            "a FeatureScript custom feature.",
+        ]
+    if status == "WARNING":
+        return [
+            "Read error_message above for the diagnostic. If it references "
+            "a missing variable (SKETCH_DIMENSION_MISSING_PARAMETER), "
+            "set_variable it in the Variable Studio first.",
+            "The feature IS in the tree with WARNING status — downstream tools "
+            "may still build on it, but the parametric binding you intended "
+            "may not be driving the geometry. Verify with describe_part_studio.",
+        ]
+    if status == "ERROR":
+        return [
+            "Feature did NOT build. Either update_feature the same id with "
+            "corrected params, or delete_feature_by_name and retry — do not "
+            "add more features on top.",
+            "Check error_message for the FS statusEnum (e.g. "
+            "SKETCH_MISSING_LOCAL_REFERENCE, INCOMPATIBLE_FACE_ENTITY) — "
+            "it names the constraint that rejected the feature.",
+        ]
+    # UNKNOWN / anything else
+    return [
+        "Feature status came back unrecognized; call describe_part_studio "
+        "to see the current feature tree + body topology before proceeding."
+    ]
+
+
 def _feature_apply_json(
     result: FeatureApplyResult,
     *,
     tool_name: Optional[str] = None,
     warnings: Optional[list[str]] = None,
     notes: Optional[list[str]] = None,
+    hints: Optional[list[str]] = None,
 ) -> str:
     """Serialize a FeatureApplyResult as the structured JSON the MCP tool returns.
 
@@ -1846,8 +1896,11 @@ def _feature_apply_json(
     both plane and faceId; using faceId"). `notes` is for informational
     bookkeeping where the tool made a judgment call on the caller's behalf
     (e.g. "auto-set oppositeDirection=true because this REMOVE extrude is
-    sketched on a picked face"). Both are only emitted when non-empty so
-    existing callers see a stable shape.
+    sketched on a picked face"). `hints` points at the next useful action
+    (describe, retry, write_featurescript_feature, etc.) based on status;
+    defaults are picked by `_hints_for_result` but callers can pass their
+    own. All three are only emitted when non-empty so existing callers see
+    a stable shape.
     """
     payload: dict[str, Any] = {
         "ok": result.ok,
@@ -1868,6 +1921,10 @@ def _feature_apply_json(
         # helper to track_changes. Topology-mutating tools default it on;
         # sketches default it off (sketches don't change body topology).
         payload["changes"] = result.changes
+    # Default status-based hints if the handler didn't override.
+    hints_list = list(hints) if hints else _hints_for_result(result)
+    if hints_list:
+        payload["hints"] = hints_list
     return json.dumps(payload, indent=2)
 
 
@@ -1951,12 +2008,17 @@ def _exception_json(
     *,
     tool_name: Optional[str] = None,
     status_code: Optional[int] = None,
+    hints: Optional[list[str]] = None,
 ) -> str:
     """Serialize an unexpected exception as the same structured shape.
 
     Used by mutating-tool handlers so clients never have to branch on whether
     the response was free text or JSON. `status` is "EXCEPTION" so callers can
     distinguish an Onshape-reported failure ("ERROR") from a plumbing failure.
+
+    Default hints point Claude at `describe_part_studio` to rediscover the
+    tree's current state -- an exception here usually means the feature
+    wasn't even attempted on Onshape's side, so the prior state is intact.
     """
     msg = str(error)
     if status_code is not None:
@@ -1971,6 +2033,16 @@ def _exception_json(
     }
     if tool_name:
         payload["tool"] = tool_name
+    hints_list = list(hints) if hints else [
+        "Tool call raised before Onshape received it -- the feature tree "
+        "is unchanged from before this call. Call describe_part_studio to "
+        "confirm, then retry with corrected params.",
+        "HTTP 4xx usually means a bad tool-arg shape (missing required "
+        "field, wrong type). Re-read the tool schema or ToolSearch the "
+        "tool name for hints.",
+    ]
+    if hints_list:
+        payload["hints"] = hints_list
     return json.dumps(payload, indent=2)
 
 
