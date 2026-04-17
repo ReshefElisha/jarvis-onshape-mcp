@@ -943,6 +943,62 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId", "radius"],
             },
         ),
+        Tool(
+            name="create_sketch",
+            description=(
+                "Create ONE sketch feature containing many entities at once. "
+                "Use this whenever you need >1 primitive on the same plane/face "
+                "(e.g. plate outline + 4 mounting holes, NEMA bolt patterns, etc.) "
+                "to avoid feature-tree bloat -- 5 holes = 1 feature here vs 5 with "
+                "the per-primitive tools. The per-primitive tools "
+                "(create_sketch_rectangle/circle/line/arc) stay available as fast "
+                "paths for one-shot sketches.\n\n"
+                "Sketch location: pass either `plane` (Front/Top/Right) or `faceId` "
+                "(from `list_entities`). `faceId` wins when both are given.\n\n"
+                "`entities` is an array of mixed primitives. Each item carries a "
+                "`type` discriminator and the type-specific args:\n"
+                "  rectangle: {type, corner1:[x,y], corner2:[x,y], variableWidth?, variableHeight?}\n"
+                "  circle:    {type, center:[x,y], radius, variableRadius?, variableCenter?:[xv,yv]}\n"
+                "  line:      {type, start:[x,y], end:[x,y]}\n"
+                "  arc:       {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
+                "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" for "
+                "explicit units."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face (from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
+                    },
+                    "entities": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "Mixed list of sketch primitives keyed by `type`.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["rectangle", "circle", "line", "arc"],
+                                },
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "entities"],
+            },
+        ),
         # === Feature Tools ===
         Tool(
             name="create_fillet",
@@ -3044,6 +3100,81 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating sketch arc")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "create_sketch":
+        try:
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
+            sketch = SketchBuilder(
+                name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id
+            )
+
+            entities = arguments.get("entities") or []
+            if not entities:
+                raise ValueError("`entities` must be a non-empty list")
+
+            for i, ent in enumerate(entities):
+                if not isinstance(ent, dict):
+                    raise ValueError(f"entities[{i}] must be an object, got {type(ent).__name__}")
+                etype = (ent.get("type") or "").lower()
+                if etype == "rectangle":
+                    sketch.add_rectangle(
+                        corner1=tuple(ent["corner1"]),
+                        corner2=tuple(ent["corner2"]),
+                        variable_width=ent.get("variableWidth"),
+                        variable_height=ent.get("variableHeight"),
+                    )
+                elif etype == "circle":
+                    var_center = ent.get("variableCenter")
+                    var_center_tuple = (
+                        (var_center[0], var_center[1])
+                        if isinstance(var_center, (list, tuple)) and len(var_center) == 2
+                        else None
+                    )
+                    sketch.add_circle(
+                        center=tuple(ent["center"]),
+                        radius=ent["radius"],
+                        variable_radius=ent.get("variableRadius"),
+                        variable_center=var_center_tuple,
+                    )
+                elif etype == "line":
+                    sketch.add_line(
+                        start=tuple(ent["start"]),
+                        end=tuple(ent["end"]),
+                    )
+                elif etype == "arc":
+                    var_center = ent.get("variableCenter")
+                    var_center_tuple = (
+                        (var_center[0], var_center[1])
+                        if isinstance(var_center, (list, tuple)) and len(var_center) == 2
+                        else None
+                    )
+                    sketch.add_arc(
+                        center=tuple(ent["center"]),
+                        radius=ent["radius"],
+                        start_angle=ent.get("startAngle", 0),
+                        end_angle=ent.get("endAngle", 180),
+                        variable_radius=ent.get("variableRadius"),
+                        variable_center=var_center_tuple,
+                    )
+                else:
+                    raise ValueError(
+                        f"entities[{i}].type must be rectangle | circle | line | arc, "
+                        f"got {ent.get('type')!r}"
+                    )
+
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                sketch.build(),
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error creating multi-entity sketch")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fillet":
