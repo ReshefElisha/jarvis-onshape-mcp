@@ -1,6 +1,11 @@
+---
+name: onshape
+description: Protocols for driving Onshape CAD via the onshape-mcp plugin. Render-first and entity-first workflows, unit + coordinate conventions, iteration discipline, when to reach for FeatureScript, and the gotchas (REMOVE-on-face auto-flip, Variable Studios as separate elements, deterministic ID remapping). Load before building anything in Onshape — the plugin's MCP tool surface makes more sense with this doc in context.
+---
+
 # Onshape MCP — Claude Skill Guide
 
-Loaded automatically as context for any Claude session driving this MCP server.
+Loaded as context for any Claude session driving the onshape-mcp plugin.
 Encodes the protocols that keep CAD builds from silently failing. Short, imperative.
 
 ## Units
@@ -93,16 +98,16 @@ Parametric variables live in a separate **Variable Studio** element, not in the 
 
 ## When to use FeatureScript
 
-Starter wraps sketches, extrudes, revolves, thickens, fillets, chamfers, patterns, booleans, mates. Anything else — threads (ISO, UTS), shells, drafts, lofts, sweeps, helical cuts, patterns along a path — needs FeatureScript. Use `write_featurescript_feature` (currently blocked on Onshape namespace issue; check commit `[fs-paradigm-wip]` status before relying on it).
+The plugin wraps sketches, extrudes, revolves, thickens, fillets, chamfers, patterns, booleans, mates, **shells** (`create_shell`), and **offset planes** (`create_offset_plane`). Anything else — threads (ISO, UTS), drafts, lofts, sweeps, helical cuts, patterns along a path, variable-radius fillets — needs FeatureScript via `write_featurescript_feature`.
 
 ## When to write a FeatureScript custom feature
 
-**Before writing FS from scratch, check `references/hedless-onshape-mcp/docs/fs-cookbook/` for a proven snippet to adapt.** Each cookbook file is a complete `defineFeature(...)` you can paste into `featureScript`, change a few numbers, and ship. Direct authorship of less-common ops burns 5-15 turns on opaque REGEN_ERRORs that the cookbook recipes have already worked through. Today's index: `helix.fs` (threads, springs, augers, helical ribs — avoids the broken `opHelix` API). Add a recipe when you find a pattern that works after >2 failed attempts.
+**Before writing FS from scratch, check `docs/fs-cookbook/` in this repo for a proven snippet to adapt.** Each cookbook file is a complete `defineFeature(...)` you can paste into `featureScript`, change a few numbers, and ship. Direct authorship of less-common ops burns 5-15 turns on opaque REGEN_ERRORs that the cookbook recipes have already worked through. Today's index: `helix.fs` (threads, springs, augers, helical ribs — avoids the broken `opHelix` API). Add a recipe when you find a pattern that works after >2 failed attempts.
 
 Tool responses now include a `hints` list that points at this section; don't ignore it. Three triggers:
 
 1. **You've done the same 3+ feature pattern twice.** Threads (sketch helix + sweep + cosmetic), bolt-circle patterns (variable + sketch + N circles + cut + annotation), standard grooves (offset + sweep-cut + fillet). The second time you write it by hand you're paying a turns-tax that never amortizes.
-2. **A primitive tool can't express it.** Helical cut, loft between profiles, draft on a set of faces, sweep along a 3D path, variable-radius fillet, shell with per-face thickness. These have no MCP tool today and won't grow one; FS is the answer.
+2. **A primitive tool can't express it.** Helical cut, loft between profiles, draft on a set of faces, sweep along a 3D path, variable-radius fillet, per-face-thickness shell. These have no MCP tool today and won't grow one; FS is the answer. (Uniform-thickness shells DO have a primitive — `create_shell`. Offset construction planes DO too — `create_offset_plane`. Reach for FS only when you need the non-uniform / multi-face version.)
 3. **You need per-instance parameters beyond what update_feature handles.** If you want `set_variable(hole_d_m3)` to retarget 8 through-holes and 8 counterbores in one shot, package the pair as a custom feature whose definition takes `hole_d` + `cbore_d` parameters. `update_feature` only tweaks one feature's params; a custom feature lets one variable bump drive the whole chain.
 
 **Minimal template** (copy, adapt, pass as `featureScript` to `write_featurescript_feature`):
@@ -145,7 +150,7 @@ The orchestrator creates a Feature Studio element, uploads the source, pulls the
 This MCP server exposes many deferred tools. Every time you call a tool that hasn't been loaded, the runtime spends a round-trip loading the schema. **Batch-load the tool surface in one `ToolSearch` call upfront**:
 
 ```
-ToolSearch(query="select:mcp__onshape__create_sketch,mcp__onshape__create_sketch_rectangle,mcp__onshape__create_sketch_circle,mcp__onshape__create_extrude,mcp__onshape__create_fillet,mcp__onshape__create_chamfer,mcp__onshape__list_entities,mcp__onshape__describe_part_studio,mcp__onshape__measure,mcp__onshape__get_mass_properties,mcp__onshape__export_part_studio,mcp__onshape__create_document,mcp__onshape__create_part_studio", max_results=15)
+ToolSearch(query="select:mcp__onshape__create_sketch,mcp__onshape__create_sketch_rectangle,mcp__onshape__create_sketch_circle,mcp__onshape__create_extrude,mcp__onshape__create_fillet,mcp__onshape__create_chamfer,mcp__onshape__create_shell,mcp__onshape__create_offset_plane,mcp__onshape__list_entities,mcp__onshape__describe_part_studio,mcp__onshape__measure,mcp__onshape__get_mass_properties,mcp__onshape__export_part_studio,mcp__onshape__create_document,mcp__onshape__create_part_studio", max_results=15)
 ```
 
 Saves 3-5 individual search calls per session. The multi-entity `create_sketch` collapses a lot of small cases; prefer it over per-primitive tools.
