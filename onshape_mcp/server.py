@@ -1837,6 +1837,55 @@ def _format_export_result(result, element_id: str) -> str:
     )
 
 
+def _enum_specific_hints(error_message: Optional[str]) -> list[str]:
+    """Pattern-match known statusEnums in `error_message` and emit targeted
+    recovery advice. Returns the empty list when nothing matches so the
+    generic status-based hints stand alone.
+
+    Each enum mapped here is one we've seen recur in dogfood AND for which
+    the generic hint ("read error_message, retry") would have wasted >=3
+    turns vs the targeted advice. Don't add an entry unless it clears that
+    bar -- noisy hints train Claude to ignore them.
+    """
+    if not error_message:
+        return []
+    hits: list[str] = []
+
+    # BOOLEAN_SUBTRACT_NO_OP: the cut feature regen succeeded but removed 0
+    # volume from the target. By far the most common cause is an
+    # extrude-cut whose direction points away from the material -- often
+    # because the caller explicitly passed `forceOppositeDirection: false`
+    # and bypassed the auto-flip on REMOVE+faceId (see efb8698 and the
+    # extrude handler block).
+    if "BOOLEAN_SUBTRACT_NO_OP" in error_message:
+        hits.append(
+            "BOOLEAN_SUBTRACT_NO_OP: the cut removed 0 volume. Most common "
+            "cause is the extrude direction pointing away from material. "
+            "If the sketch is on a picked face, call update_feature with "
+            "`forceOppositeDirection: true` (or remove the explicit "
+            "`forceOppositeDirection: false` you passed -- the auto-flip "
+            "wants to fire) so the cut goes INTO the material."
+        )
+
+    # SKETCH_DIMENSION_MISSING_PARAMETER: a sketch dimension references a
+    # variable name that isn't bound in any Variable Studio in this
+    # workspace. The sketch IS in the tree with WARNING status, but the
+    # dimension fell back to the literal seed value and is no longer
+    # parametric. Generic WARNING hint mentions this enum but doesn't tell
+    # the caller to actually create the VS first.
+    if "SKETCH_DIMENSION_MISSING_PARAMETER" in error_message:
+        hits.append(
+            "SKETCH_DIMENSION_MISSING_PARAMETER: a constraint references a "
+            "variable that no Variable Studio defines. Call "
+            "create_variable_studio (once per workspace) + set_variable "
+            "for the missing #name BEFORE re-applying the sketch -- otherwise "
+            "the dimension keeps falling back to its literal seed and the "
+            "parametric binding silently drops."
+        )
+
+    return hits
+
+
 def _hints_for_result(result: FeatureApplyResult) -> list[str]:
     """Pick the `hints` list to attach to a tool response based on its status.
 
@@ -1844,6 +1893,10 @@ def _hints_for_result(result: FeatureApplyResult) -> list[str]:
     recover from a failure, or notice when an FS custom feature would be
     cleaner than another layer of primitives. Keep each hint short and
     actionable; the downstream LLM reads these every turn.
+
+    Order: enum-specific hints (when error_message names a known statusEnum)
+    come FIRST so they're the first thing Claude reads, then the generic
+    status-based hints follow.
 
     Rotation policy:
       - OK / INFO   -> next-step reflex: describe + mention write_featurescript_feature.
@@ -1853,16 +1906,18 @@ def _hints_for_result(result: FeatureApplyResult) -> list[str]:
       - UNKNOWN     -> conservative: suggest describe_part_studio to learn state.
     """
     status = result.status
+    enum_hints = _enum_specific_hints(result.error_message)
+
     if status in ("OK", "INFO"):
-        return [
+        generic = [
             "To see what changed, call describe_part_studio — the PHYSICAL "
             "SUMMARY + changes block show new topology at a glance.",
             "Doing the same 3-feature pattern twice? write_featurescript_feature "
             "can encapsulate it as a reusable op. See SKILL.md -> When to write "
             "a FeatureScript custom feature.",
         ]
-    if status == "WARNING":
-        return [
+    elif status == "WARNING":
+        generic = [
             "Read error_message above for the diagnostic. If it references "
             "a missing variable (SKETCH_DIMENSION_MISSING_PARAMETER), "
             "set_variable it in the Variable Studio first.",
@@ -1870,8 +1925,8 @@ def _hints_for_result(result: FeatureApplyResult) -> list[str]:
             "may still build on it, but the parametric binding you intended "
             "may not be driving the geometry. Verify with describe_part_studio.",
         ]
-    if status == "ERROR":
-        return [
+    elif status == "ERROR":
+        generic = [
             "Feature did NOT build. Either update_feature the same id with "
             "corrected params, or delete_feature_by_name and retry — do not "
             "add more features on top.",
@@ -1879,11 +1934,14 @@ def _hints_for_result(result: FeatureApplyResult) -> list[str]:
             "SKETCH_MISSING_LOCAL_REFERENCE, INCOMPATIBLE_FACE_ENTITY) — "
             "it names the constraint that rejected the feature.",
         ]
-    # UNKNOWN / anything else
-    return [
-        "Feature status came back unrecognized; call describe_part_studio "
-        "to see the current feature tree + body topology before proceeding."
-    ]
+    else:
+        # UNKNOWN / anything else
+        generic = [
+            "Feature status came back unrecognized; call describe_part_studio "
+            "to see the current feature tree + body topology before proceeding."
+        ]
+
+    return enum_hints + generic
 
 
 def _feature_apply_json(
