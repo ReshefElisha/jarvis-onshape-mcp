@@ -52,11 +52,6 @@ from onshape_mcp.api.documents import DocumentManager  # noqa: E402
 from onshape_mcp.api.partstudio import PartStudioManager  # noqa: E402
 from onshape_mcp.api.rendering import get_image  # noqa: E402
 
-try:
-    from onshape_mcp.critique.gemini_critic import critique_render, CritiqueResult
-    _CRITIC_AVAILABLE = True
-except ImportError:
-    _CRITIC_AVAILABLE = False
 
 
 # --- Step kinds --------------------------------------------------------------
@@ -115,43 +110,19 @@ def assert_state(name: str, predicate: Callable[[Dict[str, Any]], Optional[str]]
     return Step(name=name, fn=_do)
 
 
-def inspect(name: str, critique: bool = True) -> Step:
+def inspect(name: str) -> Step:
     """Inspect step: render + save per-step snapshot. Always passes.
 
-    When GEMINI_API_KEY is set and `critique=True`, also routes the rendered
-    iso/top views through the Gemini critic against the test's brief. Logs
-    missing/wrong features to stderr and embeds the verdict in the saved
-    snapshot text. Does NOT fail the step on disagreement — the critic can
-    be wrong, and halting on its say-so would be brittle. Surface and move on.
+    Historical note: this used to route renders through a Gemini visual
+    critic. Per Shef's feedback the critic is deferred — it was a good
+    idea but not enough to ship, and text checks cover correctness cheaply
+    (see scratchpad/text-vs-render-calibration.md). The hook can be added
+    back later; for now inspect just saves snapshot artifacts.
     """
 
     async def _do(ctx: "DriverContext") -> Optional[str]:
         snap = await ctx.describe()
-        verdict_text = ""
-        if critique and _CRITIC_AVAILABLE and os.getenv("GEMINI_API_KEY"):
-            try:
-                images = [get_image(v.image_id) for v in snap["views"]]
-                claimed = list(ctx.feature_ids.keys())
-                result: CritiqueResult = await critique_render(
-                    brief=ctx.brief,
-                    images=images,
-                    claimed_features=claimed,
-                )
-                if result.matches_brief is False:
-                    logger.warning(
-                        f"[{name}] critic DISAGREES: missing={result.missing} "
-                        f"wrong={result.wrong} notes={result.notes!r}"
-                    )
-                elif result.matches_brief is True:
-                    logger.info(f"[{name}] critic approves ({result.notes!r})")
-                verdict_text = (
-                    f"\n\nCRITIC (Gemini): matches_brief={result.matches_brief} "
-                    f"missing={result.missing} wrong={result.wrong}\n"
-                    f"  notes: {result.notes}"
-                )
-            except Exception as e:
-                logger.warning(f"[{name}] critic call failed: {e}")
-        _save_snapshot(ctx, name, snap, extra_text=verdict_text)
+        _save_snapshot(ctx, name, snap)
         return None
 
     return Step(name=name, fn=_do, halt_on_failure=False)
