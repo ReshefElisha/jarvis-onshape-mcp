@@ -1681,6 +1681,35 @@ class TestFeatureTools:
         assert parsed["tool"] == "create_sketch_circle"
 
     @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_sketch_circle_variable_radius_and_center(
+        self, mock_ps, mock_apply
+    ):
+        """variableRadius/variableCenter reach the builder and become constraints."""
+        mock_ps.get_plane_id = AsyncMock(return_value="plane1")
+        mock_apply.return_value = _mock_apply_result(feature_id="circ_var")
+
+        await call_tool("create_sketch_circle", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "radius": 5,
+            "variableRadius": "holeR",
+            "variableCenter": ["holeX", "holeY"],
+        })
+
+        feature_payload = mock_apply.await_args[0][4]
+        constraints = feature_payload["feature"]["constraints"]
+        kinds = [c.get("constraintType") for c in constraints]
+        assert "RADIUS" in kinds
+        assert kinds.count("DISTANCE") == 2
+        radius_expr = next(
+            p["expression"]
+            for c in constraints if c["constraintType"] == "RADIUS"
+            for p in c["parameters"] if p.get("btType") == "BTMParameterQuantity-147"
+        )
+        assert radius_expr == "#holeR"
+
+    @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")
     async def test_create_sketch_circle_error(self, mock_ps):
         mock_ps.get_plane_id = AsyncMock(side_effect=Exception("fail"))
@@ -1727,6 +1756,41 @@ class TestFeatureTools:
         parsed = _json.loads(result[0].text)
         assert parsed["ok"] is True
         assert parsed["feature_id"] == "arc123"
+
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
+    @patch("onshape_mcp.server.partstudio_manager")
+    async def test_create_sketch_arc_variable_radius_and_center(
+        self, mock_ps, mock_apply
+    ):
+        """variableRadius/variableCenter plumb through for arcs too."""
+        mock_ps.get_plane_id = AsyncMock(return_value="plane1")
+        mock_apply.return_value = _mock_apply_result(feature_id="arc_var")
+
+        await call_tool("create_sketch_arc", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "radius": 10,
+            "startAngle": 0, "endAngle": 180,
+            "variableRadius": "arcR",
+            "variableCenter": ["ax", "ay"],
+        })
+
+        feature_payload = mock_apply.await_args[0][4]
+        constraints = feature_payload["feature"]["constraints"]
+        radius_expr = next(
+            p["expression"]
+            for c in constraints if c.get("constraintType") == "RADIUS"
+            for p in c["parameters"] if p.get("btType") == "BTMParameterQuantity-147"
+        )
+        assert radius_expr == "#arcR"
+        distance_dirs = sorted(
+            next(
+                p["value"] for p in c["parameters"]
+                if p.get("enumName") == "DimensionDirection"
+            )
+            for c in constraints if c.get("constraintType") == "DISTANCE"
+        )
+        assert distance_dirs == ["HORIZONTAL", "VERTICAL"]
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.partstudio_manager")

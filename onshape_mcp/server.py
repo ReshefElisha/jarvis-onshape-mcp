@@ -240,30 +240,76 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_variables",
-            description="Get all variables from a Part Studio variable table",
+            description=(
+                "Get all variables from a Variable Studio (or Part Studio). "
+                "Modern Onshape stores variables in dedicated Variable Studio "
+                "elements; pass a Variable Studio elementId here to read its "
+                "variables. Pass a Part Studio elementId to read the (usually "
+                "empty) variables owned by that PS."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "documentId": {"type": "string", "description": "Document ID"},
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
-                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "elementId": {
+                        "type": "string",
+                        "description": "Variable Studio (preferred) or Part Studio element ID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
             },
         ),
         Tool(
-            name="set_variable",
-            description="Set or update a variable in a Part Studio variable table",
+            name="create_variable_studio",
+            description=(
+                "Create a Variable Studio element in a workspace. Required "
+                "before set_variable on modern Onshape docs -- the legacy "
+                "Part Studio /variables write path is read-only. Returns the "
+                "new VS element id; use it as elementId for set_variable / "
+                "get_variables."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "documentId": {"type": "string", "description": "Document ID"},
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
-                    "elementId": {"type": "string", "description": "Part Studio element ID"},
-                    "name": {"type": "string", "description": "Variable name"},
+                    "name": {
+                        "type": "string",
+                        "description": "Name for the new Variable Studio element",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "name"],
+            },
+        ),
+        Tool(
+            name="set_variable",
+            description=(
+                "Write or update a variable in a Variable Studio. `elementId` "
+                "MUST be a Variable Studio element id (from "
+                "`create_variable_studio`); writing to a Part Studio /variables "
+                "endpoint 404s on modern docs. Other Part Studios in the same "
+                "workspace can reference this variable as `#name` in any "
+                "expression (sketch dimensions, extrude depths, etc.)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {
+                        "type": "string",
+                        "description": "Variable Studio element ID (from create_variable_studio)",
+                    },
+                    "name": {"type": "string", "description": "Variable name (FS identifier rules)"},
                     "expression": {
                         "type": "string",
-                        "description": "Variable expression (e.g., '0.75 in')",
+                        "description": "Variable expression (e.g., '30 mm', '0.75 in', '90 deg')",
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["LENGTH", "ANGLE", "NUMBER", "ANY"],
+                        "description": "FeatureScript variable type. Defaults to LENGTH.",
                     },
                     "description": {
                         "type": "string",
@@ -768,6 +814,26 @@ async def list_tools() -> list[Tool]:
                     "centerX": {"type": ["number", "string"], "description": "Center X (bare=mm). Legacy; prefer `center`.", "default": 0},
                     "centerY": {"type": ["number", "string"], "description": "Center Y (bare=mm). Legacy; prefer `center`.", "default": 0},
                     "radius": {"type": ["number", "string"], "description": "Radius. Bare=mm; use \"5 mm\" / \"0.125 in\" for explicit units."},
+                    "variableRadius": {
+                        "type": "string",
+                        "description": (
+                            "Optional variable-table name to drive the radius parametrically. "
+                            "Emits a RADIUS dimensional constraint with expression `#<name>` "
+                            "so a later set_variable call resizes the hole without touching "
+                            "this sketch."
+                        ),
+                    },
+                    "variableCenter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": (
+                            "Optional [x_var, y_var] variable names. Emits HORIZONTAL + "
+                            "VERTICAL DISTANCE constraints from the sketch origin to the "
+                            "circle center, driven by `#x_var` / `#y_var`."
+                        ),
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "radius"],
             },
@@ -846,6 +912,23 @@ async def list_tools() -> list[Tool]:
                     "centerX": {"type": ["number", "string"], "description": "Center X (bare=mm). Legacy; prefer `center`.", "default": 0},
                     "centerY": {"type": ["number", "string"], "description": "Center Y (bare=mm). Legacy; prefer `center`.", "default": 0},
                     "radius": {"type": ["number", "string"], "description": "Radius. Bare=mm; use \"5 mm\" / \"0.125 in\" for explicit units."},
+                    "variableRadius": {
+                        "type": "string",
+                        "description": (
+                            "Optional variable-table name to drive the arc radius parametrically. "
+                            "Emits a RADIUS constraint with expression `#<name>`."
+                        ),
+                    },
+                    "variableCenter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": (
+                            "Optional [x_var, y_var] variable names. HORIZONTAL + VERTICAL "
+                            "DISTANCE constraints from sketch origin to arc center."
+                        ),
+                    },
                     "startAngle": {
                         "type": "number",
                         "description": "Start angle in degrees (0 = positive X)",
@@ -1968,31 +2051,81 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 )
             ]
 
+    elif name == "create_variable_studio":
+        try:
+            vs_eid = await variable_manager.create_variable_studio(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["name"],
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Created Variable Studio '{arguments['name']}'\n"
+                        f"Element ID: {vs_eid}\n"
+                        f"Use this ID as elementId for set_variable and get_variables."
+                    ),
+                )
+            ]
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"API error creating Variable Studio: {e.response.status_code} - {e.response.text[:500]}"
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating Variable Studio: API returned {e.response.status_code}.",
+                )
+            ]
+        except Exception as e:
+            logger.exception("Unexpected error creating Variable Studio")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error creating Variable Studio: {str(e)}",
+                )
+            ]
+
     elif name == "set_variable":
         try:
-            result = await variable_manager.set_variable(
+            await variable_manager.set_variable(
                 arguments["documentId"],
                 arguments["workspaceId"],
                 arguments["elementId"],
                 arguments["name"],
                 arguments["expression"],
                 arguments.get("description"),
+                arguments.get("type", "LENGTH"),
             )
 
             return [
                 TextContent(
                     type="text",
-                    text=f"Set variable '{arguments['name']}' = {arguments['expression']}",
+                    text=(
+                        f"Set variable '{arguments['name']}' = {arguments['expression']} "
+                        f"({arguments.get('type', 'LENGTH')}) in Variable Studio "
+                        f"{arguments['elementId']}"
+                    ),
                 )
             ]
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"API error setting variable: {e.response.status_code} - {e.response.text[:500]}"
             )
+            hint = ""
+            if e.response.status_code == 404:
+                hint = (
+                    " 404 usually means elementId is a Part Studio, not a "
+                    "Variable Studio -- call create_variable_studio first."
+                )
             return [
                 TextContent(
                     type="text",
-                    text=f"Error setting variable: API returned {e.response.status_code}. Check the variable expression format (e.g., '0.75 in').",
+                    text=(
+                        f"Error setting variable: API returned {e.response.status_code}. "
+                        f"Check the variable expression format (e.g., '0.75 in').{hint}"
+                    ),
                 )
             ]
         except Exception as e:
@@ -2833,9 +2966,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             else:
                 cx = arguments.get("centerX", 0)
                 cy = arguments.get("centerY", 0)
+            var_center_arg = arguments.get("variableCenter")
+            var_center = (
+                (var_center_arg[0], var_center_arg[1])
+                if isinstance(var_center_arg, (list, tuple)) and len(var_center_arg) == 2
+                else None
+            )
             sketch.add_circle(
                 center=(cx, cy),
                 radius=arguments["radius"],
+                variable_radius=arguments.get("variableRadius"),
+                variable_center=var_center,
             )
             result = await apply_feature_and_check(
                 client,
@@ -2879,11 +3020,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             else:
                 cx = arguments.get("centerX", 0)
                 cy = arguments.get("centerY", 0)
+            var_center_arg = arguments.get("variableCenter")
+            var_center = (
+                (var_center_arg[0], var_center_arg[1])
+                if isinstance(var_center_arg, (list, tuple)) and len(var_center_arg) == 2
+                else None
+            )
             sketch.add_arc(
                 center=(cx, cy),
                 radius=arguments["radius"],
                 start_angle=arguments.get("startAngle", 0),
                 end_angle=arguments.get("endAngle", 180),
+                variable_radius=arguments.get("variableRadius"),
+                variable_center=var_center,
             )
             result = await apply_feature_and_check(
                 client,
