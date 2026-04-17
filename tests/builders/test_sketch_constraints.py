@@ -129,6 +129,22 @@ def test_vertical_distance_alias():
     assert _param(r, "direction")["value"] == "VERTICAL"
 
 
+def test_length_alias_maps_to_minimum_distance():
+    """LENGTH is a natural-name alias (line length, slot end-to-end).
+    Regression from lgvhcnlr's bracket dogfood — Claude guessed LENGTH
+    for a slot end-to-end dimension and got 'Unknown constraint type'."""
+    r = serialize("LENGTH", entities=["slot_a", "slot_b"], value="30 mm")
+    assert r["constraintType"] == "DISTANCE"
+    assert _param(r, "direction")["value"] == "MINIMUM"
+    assert _param(r, "length")["expression"] == "30 mm"
+
+
+def test_length_alias_respects_explicit_direction():
+    r = serialize("LENGTH", entities=["a", "b"], value="30 mm",
+                  direction="HORIZONTAL")
+    assert _param(r, "direction")["value"] == "HORIZONTAL"
+
+
 def test_angle_degrees_default():
     r = serialize("ANGLE", entities=["line1", "line2"], value="90")
     assert r["constraintType"] == "ANGLE"
