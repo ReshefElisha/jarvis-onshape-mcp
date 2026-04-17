@@ -2254,7 +2254,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["workspaceId"],
                 arguments["elementId"],
                 extrude.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(
                 result, tool_name=name, notes=notes,
@@ -2290,7 +2290,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["workspaceId"],
                 arguments["elementId"],
                 {"feature": thicken.build()},
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3439,7 +3439,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 fillet.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3460,7 +3460,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 chamfer.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3488,7 +3488,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 revolve.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3521,7 +3521,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 pattern.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3544,7 +3544,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 pattern.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3565,7 +3565,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 boolean.build(),
-                track_changes=True,
+                track_changes=bool(arguments.get("trackChanges", True)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
