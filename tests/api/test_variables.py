@@ -93,11 +93,17 @@ class TestVariableManager:
     async def test_get_variables_handles_missing_fields(
         self, variable_manager, onshape_client, sample_document_ids
     ):
-        """Test handling variables with missing optional fields."""
+        """Test handling variables with missing optional fields. Wrapped in
+        the actual API response shape (list of one wrapper)."""
         variables_data = [
-            {"name": "var1", "expression": "1 in"},
-            {"expression": "2 in"},  # Missing name
-            {"name": "var2"},  # Missing expression
+            {
+                "variableStudioReference": None,
+                "variables": [
+                    {"name": "var1", "expression": "1 in"},
+                    {"expression": "2 in"},  # Missing name
+                    {"name": "var2"},  # Missing expression
+                ],
+            }
         ]
 
         onshape_client.get = AsyncMock(return_value=variables_data)
