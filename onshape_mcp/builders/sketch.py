@@ -747,6 +747,24 @@ class SketchBuilder:
         Distances are relative to Onshape's implicit sketch `origin` point,
         with the x/y variable expressions driving them. Extracted as a helper
         because add_arc will use the same pattern.
+
+        STATUS 2026-04-17: **broken**. `localFirst: "origin"` does not resolve
+        to any local sketch entity -- confirmed by
+        `sketchEntityQuery(sketchId, EntityType.VERTEX, "origin")` returning
+        zero vertices. Every sketch that uses this helper comes back with
+        `featureStatus: WARNING` and `SKETCH_MISSING_LOCAL_REFERENCE`, and
+        the center is never actually driven by the variable. The seed
+        geometry is the only thing holding it in place.
+
+        Correct fix (not yet implemented): replace `localFirst/localSecond`
+        with `externalFirst` carrying a BTMIndividualQuery of the Part
+        Studio's Origin feature. That needs the Onshape-UI constraint
+        payload format; investigation notes in
+        `scratchpad/signed-variable-center-investigation.md`.
+
+        Until fixed, use literal coordinates with explicit `#var` /
+        `#minus_var` expressions instead of `variable_center`. See the
+        "Known-broken: variableCenter" entry in SKILL.md.
         """
         return [
             {

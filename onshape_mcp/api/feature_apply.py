@@ -30,6 +30,10 @@ class FeatureApplyResult(BaseModel):
 
     `ok` is True iff `status == "OK"`. For WARNING, the feature built but
     Onshape has a concern worth surfacing; `error_message` will carry it.
+
+    `changes` (when set) is a git-diff-style summary of what the feature
+    altered in the part — volume delta, faces added/removed, bbox change,
+    anomalies. Only populated when the caller passed `track_changes=True`.
     """
 
     ok: bool
@@ -38,6 +42,7 @@ class FeatureApplyResult(BaseModel):
     feature_name: str
     feature_type: str
     error_message: Optional[str] = None
+    changes: Optional[Dict[str, Any]] = None
     raw: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -50,6 +55,7 @@ async def apply_feature_and_check(
     *,
     operation: Literal["create", "update"] = "create",
     feature_id: Optional[str] = None,
+    track_changes: bool = False,
 ) -> FeatureApplyResult:
     """Apply a feature to a Part Studio and return its Onshape-reported status.
 
@@ -86,6 +92,24 @@ async def apply_feature_and_check(
         f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
     )
     path = base if operation == "create" else f"{base}/featureid/{feature_id}"
+
+    # Snapshot bodies before the feature if caller wants a git-diff-style
+    # `changes` block. Failures to snapshot don't block the feature apply —
+    # we just skip the diff and log.
+    bodies_before = None
+    mass_before: Optional[Dict[str, Any]] = None
+    if track_changes:
+        try:
+            bd = await client.get(
+                f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/bodydetails"
+            )
+            bodies_before = bd.get("bodies") or []
+            mass_before = await client.get(
+                f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/massproperties"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"track_changes: before-snapshot failed ({e}); skipping diff")
+            bodies_before = None
 
     response = await client.post(path, data=feature_payload)
 
@@ -124,7 +148,32 @@ async def apply_feature_and_check(
 
     error_message: Optional[str] = None
     if status != "OK":
-        error_message = _extract_error_message(state or {})
+        fs_status = await _fetch_feature_status_enum(
+            client, document_id, workspace_id, element_id, real_feature_id
+        )
+        error_message = _extract_error_message(state or {}, fs_status=fs_status)
+
+    # After-snapshot + diff. Only if caller asked AND before-snapshot succeeded
+    # AND the feature actually built (diffing after an ERROR would likely just
+    # show the pre-feature state unchanged).
+    changes: Optional[Dict[str, Any]] = None
+    if track_changes and bodies_before is not None and ok:
+        try:
+            bd_after = await client.get(
+                f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/bodydetails"
+            )
+            bodies_after = bd_after.get("bodies") or []
+            mass_after = await client.get(
+                f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/massproperties"
+            )
+            from .geometry_diff import compute_diff
+            changes = compute_diff(
+                bodies_before, bodies_after,
+                mass_before=mass_before, mass_after=mass_after,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"track_changes: diff failed ({e}); skipping")
+            changes = None
 
     return FeatureApplyResult(
         ok=ok,
@@ -133,6 +182,7 @@ async def apply_feature_and_check(
         feature_name=feature_name,
         feature_type=feature_type,
         error_message=error_message,
+        changes=changes,
         raw=response if isinstance(response, dict) else {},
     )
 
@@ -203,7 +253,14 @@ async def apply_assembly_feature_and_check(
 
     error_message: Optional[str] = None
     if status != "OK":
-        error_message = _extract_error_message(state or {})
+        # Assembly contexts don't expose getFeatureStatus via FS (there's no
+        # Part Studio context for eval), so this returns None and we fall
+        # through to the legacy blob dump -- keeps the surface consistent.
+        fs_status = await _fetch_feature_status_enum(
+            client, document_id, workspace_id, element_id, real_feature_id,
+            is_assembly=True,
+        )
+        error_message = _extract_error_message(state or {}, fs_status=fs_status)
 
     return FeatureApplyResult(
         ok=ok,
@@ -325,18 +382,42 @@ async def update_feature_params_and_check(
     )
 
 
-def _extract_error_message(state: Dict[str, Any]) -> str:
+def _extract_error_message(
+    state: Dict[str, Any],
+    fs_status: Optional[Dict[str, Any]] = None,
+) -> str:
     """Pull a useful error string out of a BTFeatureState blob.
 
-    Onshape may populate `message`, `feedback` (a list of `{severity, message, ...}`),
-    both, or neither. If neither, serialize the whole state so the LLM-facing layer
-    at least sees raw data.
+    Onshape's `featureState` wire field only carries `{btType, featureStatus,
+    inactive}` on most sketch/extrude warnings -- no `message`, no `feedback`.
+    The diagnostic (`SKETCH_DIMENSION_MISSING_PARAMETER`, etc.) lives inside
+    the FS runtime and is only reachable by calling `getFeatureStatus(context,
+    id)` via `/featurescript`. `fs_status` is the unwrapped result of that
+    call, carrying `{statusEnum?, statusType}`. We prefer it over the blob
+    because the enum is a machine-readable, greppable handle callers can act
+    on.
+
+    Fall-through order:
+      1. `fs_status.statusEnum` + `statusType` (new, always actionable)
+      2. `state.message` (rarely populated in practice)
+      3. `state.feedback[].{severity, message}` (rarely populated)
+      4. Raw JSON dump of `state` (last resort so callers see something)
     """
+
+    parts: List[str] = []
+
+    if isinstance(fs_status, dict):
+        enum_val = fs_status.get("statusEnum")
+        type_val = fs_status.get("statusType")
+        if enum_val:
+            # Machine-readable. Keep it prominent but include a human hint.
+            parts.append(
+                f"{enum_val} ({type_val})" if type_val else str(enum_val)
+            )
 
     message = state.get("message")
     feedback = state.get("feedback")
 
-    parts: List[str] = []
     if isinstance(message, str) and message.strip():
         parts.append(message.strip())
 
@@ -352,5 +433,72 @@ def _extract_error_message(state: Dict[str, Any]) -> str:
     if parts:
         return " | ".join(parts)
 
-    # Nothing structured — dump raw state so callers aren't blind.
+    # Nothing structured -- dump raw state so callers aren't blind.
     return json.dumps(state, default=str)
+
+
+async def _fetch_feature_status_enum(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    *,
+    is_assembly: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Call FS `getFeatureStatus(context, id)` for a specific feature and
+    return the unwrapped `{statusEnum, statusType}` map (or None on failure).
+
+    Only runs on non-OK statuses; the happy path never pays for this. On any
+    error (bad response shape, network blip, assembly context that can't run
+    FS) returns None so the caller falls back to the blob dump -- enrichment
+    is best-effort, it must never fail the write.
+    """
+    if not feature_id:
+        return None
+    kind = "assemblies" if is_assembly else "partstudios"
+    path = f"/api/v8/{kind}/d/{document_id}/w/{workspace_id}/e/{element_id}/featurescript"
+    # Escape double quotes / backslashes in the id for safety, though real
+    # Onshape featureIds never contain those.
+    safe_id = feature_id.replace("\\", "\\\\").replace('"', '\\"')
+    script = (
+        "function(context is Context, queries) {\n"
+        f'    return getFeatureStatus(context, ["{safe_id}"] as Id);\n'
+        "}"
+    )
+    try:
+        resp = await client.post(path, data={"script": script})
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"getFeatureStatus FS call failed: {e}")
+        return None
+
+    return _unwrap_fsvalue(resp.get("result"))
+
+
+def _unwrap_fsvalue(v: Any) -> Any:
+    """Convert a BTFSValue* tree back to plain Python.
+
+    FS returns all values wrapped in `{btType: "...BTFSValue<kind>", value: ...}`.
+    Maps nest further as lists of `{key, value}` entries. Arrays are lists of
+    wrapped values. Scalars (string/bool/number/undefined) carry the value
+    directly on the wrapper. This is a narrow-scope helper for the enrichment
+    path; the full rendering module has its own unwrapper.
+    """
+    if not isinstance(v, dict):
+        return v
+    btt = v.get("btType", "")
+    if "ValueMap" in btt:
+        out: Dict[Any, Any] = {}
+        for ent in v.get("value") or []:
+            if not isinstance(ent, dict):
+                continue
+            k = _unwrap_fsvalue(ent.get("key"))
+            out[k] = _unwrap_fsvalue(ent.get("value"))
+        return out
+    if "ValueArray" in btt:
+        return [_unwrap_fsvalue(x) for x in (v.get("value") or [])]
+    if "ValueUndefined" in btt:
+        return None
+    # Scalars (string, boolean, number, value-with-units) expose the payload
+    # directly under `value`.
+    return v.get("value")
