@@ -223,13 +223,23 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": (
                             "If true, extrude in the direction OPPOSITE the sketch normal. "
-                            "CRITICAL for REMOVE on a sketched face: without this, the cut "
-                            "goes away from the material (into air) and silently removes "
-                            "nothing (Onshape returns featureStatus=INFO). Default false; "
-                            "set true for 'cut into existing body from a +Z face' patterns. "
-                            "Ignored when endType is SYMMETRIC."
+                            "For REMOVE on a sketched picked face this tool auto-flips to "
+                            "true regardless of what you pass — because the default "
+                            "(sketch-normal direction) cuts AWAY from the material and "
+                            "silently removes nothing (Onshape returns featureStatus=INFO). "
+                            "Use `forceOppositeDirection: false` to override the auto-flip "
+                            "if you actually need the non-default direction (rare)."
                         ),
-                        "default": False,
+                    },
+                    "forceOppositeDirection": {
+                        "type": "boolean",
+                        "description": (
+                            "Escape hatch that disables the REMOVE+faceId auto-flip. "
+                            "Pass true/false to bypass the heuristic entirely. Only use "
+                            "this for the unusual case of deliberately cutting away from "
+                            "the picked face (e.g. through from underneath). Leaving this "
+                            "absent is correct 99% of the time."
+                        ),
                     },
                     "endType": {
                         "type": "string",
@@ -2290,10 +2300,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             # the operation is REMOVE AND the sketch lives on a picked face,
             # default to True so the cut goes INTO material. Surface a `notes`
             # entry in the response so callers see what got auto-decided.
-            opp_explicit = "oppositeDirection" in arguments
+            # Auto-flip oppositeDirection on REMOVE+faceId. Earlier the check
+            # gated on `"oppositeDirection" in arguments` — but MCP clients
+            # fill schema defaults before dispatch, so `{oppositeDirection:
+            # false}` could arrive even when the LLM omitted the field. We
+            # now treat None and absent the same, and auto-flip on REMOVE+
+            # faceId unless the caller explicitly opts out via
+            # `forceOppositeDirection` (rare override for cutting through
+            # from underneath). The tool schema no longer declares a False
+            # default so clean clients don't auto-fill.
+            opp_raw = arguments.get("oppositeDirection")
+            force_flag = arguments.get("forceOppositeDirection")  # explicit override
+            opp = bool(opp_raw) if opp_raw is not None else False
             notes: list[str] = []
-            opp = bool(arguments.get("oppositeDirection", False))
-            if not opp_explicit and op_type == ExtrudeType.REMOVE:
+            if op_type == ExtrudeType.REMOVE and force_flag is None:
                 on_face = await _sketch_is_on_face(
                     arguments["documentId"],
                     arguments["workspaceId"],
@@ -2304,12 +2324,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                     opp = True
                     notes.append(
                         "auto-set oppositeDirection=true because this REMOVE "
-                        "extrude is sketched on a picked face -- cutting INTO "
+                        "extrude is sketched on a picked face — cutting INTO "
                         "the material, not out into air. Pass "
-                        "`oppositeDirection: false` explicitly if you wanted "
-                        "to extrude away from the face (e.g. cutting through "
+                        "`forceOppositeDirection: false` to override and "
+                        "extrude away from the face (e.g. cutting through "
                         "from underneath)."
                     )
+            elif force_flag is not None:
+                opp = bool(force_flag)
+                notes.append(
+                    f"forceOppositeDirection={bool(force_flag)} honored explicitly; "
+                    "auto-detect skipped. Only use this when you need the non-default "
+                    "direction on a REMOVE-on-face cut."
+                )
 
             extrude = ExtrudeBuilder(
                 name=arguments.get("name", "Extrude"),
