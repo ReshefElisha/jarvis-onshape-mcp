@@ -1,0 +1,247 @@
+{
+  "description": "Real working sketch from display cabinets document - rectangle with variable dimensions",
+  "sketch": {
+    "btType": "BTMSketch-151",
+    "name": "back panel",
+    "featureId": "FWXtkjgpR9vOAbK_0",
+    "featureType": "newSketch",
+    "suppressed": false,
+    "namespace": "",
+    "returnAfterSubfeatures": false,
+    "subFeatures": [],
+    "suppressionState": null,
+    "parameterLibraries": [],
+    "parameters": [
+      {
+        "btType": "BTMParameterQueryList-148",
+        "parameterId": "sketchPlane",
+        "queries": [
+          {
+            "btType": "BTMIndividualQuery-138",
+            "queryString": "query=qCompressed(1.0,\"%B5$QueryM4Sa$entityTypeBa$EntityTypeS4$FACESb$historyTypeS8$CREATIONSb$operationIdB2$IdA1S5.7$FrontplaneOpS9$queryTypeS5$DUMMY\",id);",
+            "deterministicIds": ["JCC"],
+            "queryStatement": null,
+            "nodeId": "FdcWhJ6fr8B4gTD"
+          }
+        ],
+        "filter": {
+          "btType": "BTOrFilter-167",
+          "operand1": {
+            "btType": "BTOrFilter-167"
+          },
+          "operand2": {
+            "btType": "BTBodyTypeFilter-112",
+            "bodyType": "MATE_CONNECTOR"
+          }
+        },
+        "nodeId": "TbS11nOjvtm6ro4r",
+        "parameterName": "",
+        "libraryRelationType": "NONE"
+      },
+      {
+        "btType": "BTMParameterBoolean-144",
+        "value": false,
+        "parameterId": "disableImprinting",
+        "nodeId": "x2Ah/Cb9hB/UvQ6A",
+        "parameterName": "",
+        "libraryRelationType": "NONE"
+      }
+    ],
+    "entities": [
+      {
+        "btType": "BTMSketchCurveSegment-155",
+        "entityId": "AjpZLHQCiR3I.bottom",
+        "geometry": {
+          "btType": "BTCurveGeometryLine-117",
+          "pntX": -0.023276226103849884,
+          "pntY": 0.8524875000000001,
+          "dirX": 1.0,
+          "dirY": 1.8369701987210297e-16
+        },
+        "startPointId": "AjpZLHQCiR3I.bottom.start",
+        "endPointId": "AjpZLHQCiR3I.bottom.end",
+        "startParam": -0.4783737738961498,
+        "endParam": 0.5249262261038499,
+        "isConstruction": false,
+        "nodeId": "MWdZcyfbRrYS1VKYr",
+        "index": 1
+      }
+    ],
+    "constraints": [
+      {
+        "btType": "BTMSketchConstraint-2",
+        "entityId": "EVyXR2L6jY1V",
+        "constraintType": "LENGTH",
+        "parameters": [
+          {
+            "btType": "BTMParameterString-149",
+            "value": "AjpZLHQCiR3I.bottom",
+            "parameterId": "localFirst",
+            "nodeId": "MeT6oqKrfLQ6w8eLu"
+          },
+          {
+            "btType": "BTMParameterQuantity-147",
+            "isInteger": false,
+            "value": 0.0,
+            "units": "",
+            "expression": "#side_cabinet_width",
+            "parameterId": "length",
+            "nodeId": "MzrP9unSq4BrFMKv4"
+          }
+        ]
+      },
+      {
+        "btType": "BTMSketchConstraint-2",
+        "entityId": "prcyyjBUEoBP",
+        "constraintType": "LENGTH",
+        "parameters": [
+          {
+            "btType": "BTMParameterString-149",
+            "value": "AjpZLHQCiR3I.right",
+            "parameterId": "localFirst",
+            "nodeId": "M1wfAGoS2SHw3Su4u"
+          },
+          {
+            "btType": "BTMParameterQuantity-147",
+            "isInteger": false,
+            "value": 0.0,
+            "units": "",
+            "expression": "#side_cabinet_height",
+            "parameterId": "length",
+            "nodeId": "M4WCEJUkNRs/jjxFn"
+          }
+        ]
+      },
+      {
+        "btType": "BTMSketchConstraint-2",
+        "entityId": "vsdypZbUeS39",
+        "constraintType": "DISTANCE",
+        "comment": "Distance from Right plane (JEC) to sketch",
+        "parameters": [
+          {
+            "btType": "BTMParameterQueryList-148",
+            "parameterId": "externalFirst",
+            "queries": [
+              {
+                "btType": "BTMIndividualQuery-138",
+                "deterministicIds": ["JEC"]
+              }
+            ]
+          },
+          {
+            "btType": "BTMParameterString-149",
+            "value": "AjpZLHQCiR3I.right",
+            "parameterId": "localSecond"
+          },
+          {
+            "btType": "BTMParameterQuantity-147",
+            "expression": "#side_cabinet_width/2",
+            "parameterId": "length"
+          }
+        ]
+      },
+      {
+        "btType": "BTMSketchConstraint-2",
+        "entityId": "iwfxkFes8dFq",
+        "constraintType": "DISTANCE",
+        "comment": "Distance from Top plane (JDC) to sketch",
+        "parameters": [
+          {
+            "btType": "BTMParameterQueryList-148",
+            "parameterId": "externalFirst",
+            "queries": [
+              {
+                "btType": "BTMIndividualQuery-138",
+                "deterministicIds": ["JDC"]
+              }
+            ]
+          },
+          {
+            "btType": "BTMParameterString-149",
+            "value": "AjpZLHQCiR3I.top",
+            "parameterId": "localSecond"
+          },
+          {
+            "btType": "BTMParameterQuantity-147",
+            "expression": "#side_cabinet_height/2",
+            "parameterId": "length"
+          }
+        ]
+      }
+    ],
+    "nodeId": "vBH/27Q9dU4V24nL"
+  },
+  "thicken": {
+    "btType": "BTMFeature-134",
+    "name": "Thicken 1",
+    "featureId": "FVsfqYeclVHClNI_0",
+    "featureType": "thicken",
+    "suppressed": false,
+    "namespace": "",
+    "returnAfterSubfeatures": false,
+    "subFeatures": [],
+    "suppressionState": null,
+    "parameterLibraries": [],
+    "parameters": [
+      {
+        "btType": "BTMParameterEnum-145",
+        "enumName": "NewBodyOperationType",
+        "value": "NEW",
+        "parameterId": "operationType",
+        "nodeId": "ChhYjGUHAYmetuvP"
+      },
+      {
+        "btType": "BTMParameterQueryList-148",
+        "parameterId": "entities",
+        "queries": [
+          {
+            "btType": "BTMIndividualSketchRegionQuery-140",
+            "featureId": "FWXtkjgpR9vOAbK_0",
+            "filterInnerLoops": true,
+            "queryString": "query = qSketchRegion(id + \"FWXtkjgpR9vOAbK_0\", true);",
+            "deterministicIds": ["JGC"]
+          }
+        ]
+      },
+      {
+        "btType": "BTMParameterQuantity-147",
+        "isInteger": false,
+        "value": 0.0,
+        "units": "",
+        "expression": "#side_cabinet_wall_thickness",
+        "parameterId": "thickness1",
+        "nodeId": "leAZNjSFqhduDW6E"
+      },
+      {
+        "btType": "BTMParameterBoolean-144",
+        "value": false,
+        "parameterId": "oppositeDirection",
+        "nodeId": "WsK2M2e/T3WkznUc"
+      }
+    ],
+    "nodeId": "6reOMPIo7XyyvQqu"
+  },
+  "key_observations": {
+    "sketch_structure": {
+      "1": "BTMSketch-151 is at TOP level (not wrapped in BTMFeature-134)",
+      "2": "Has featureType='newSketch' field",
+      "3": "Has entities array with BTMSketchCurveSegment-155 items",
+      "4": "Has constraints array with BTMSketchConstraint-2 items",
+      "5": "Variables referenced with # prefix: '#side_cabinet_width'"
+    },
+    "plane_references": {
+      "Front": "JCC",
+      "Top": "JDC",
+      "Right": "JEC"
+    },
+    "centering_technique": {
+      "description": "Uses DISTANCE constraints to position sketch relative to planes",
+      "example": "Distance from Right plane = #side_cabinet_width/2"
+    },
+    "thicken_vs_extrude": {
+      "note": "User used 'thicken' feature, not 'extrude'",
+      "thicken": "Creates 3D from 2D sketch by adding thickness",
+      "references_sketch": "Uses BTMIndividualSketchRegionQuery-140 to reference sketch regions"
+    }
+  }
+}
