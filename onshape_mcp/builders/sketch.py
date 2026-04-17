@@ -374,13 +374,27 @@ class SketchBuilder:
         center: Tuple[LengthLike, LengthLike],
         radius: LengthLike,
         is_construction: bool = False,
+        variable_radius: Optional[str] = None,
+        variable_center: Optional[Tuple[str, str]] = None,
     ) -> "SketchBuilder":
         """Add a circle to the sketch.
 
         Args:
-            center: Center point `(x, y)` (number = mm, or "10 mm" / "0.5 in")
-            radius: Radius (number = mm, or string with explicit unit)
+            center: Center point `(x, y)` (number = mm, or "10 mm" / "0.5 in").
+                Used for the initial position; if `variable_center` is also
+                given, those dimension constraints override the seeded position.
+            radius: Radius (number = mm, or string with explicit unit). Same
+                seeding role as `center` when `variable_radius` is given.
             is_construction: Whether this is construction geometry
+            variable_radius: Optional variable name. When set, a DIAMETER
+                constraint emitted with expression `#<var>*2` drives the
+                circle radius from a variable table entry instead of a
+                literal, so the caller can parametrically resize by
+                `set_variable`.
+            variable_center: Optional `(x_var, y_var)` pair of variable names.
+                When set, DISTANCE constraints from the sketch origin (the
+                `Origin` implicit entity) to the circle's centerId drive
+                the center position parametrically.
 
         Returns:
             Self for chaining
@@ -483,7 +497,128 @@ class SketchBuilder:
             }
         )
 
+        # Optional dimensional constraints that reference a variable. Variables
+        # are prefixed with "#" in Onshape's expression parser, matching the
+        # rectangle LENGTH constraint pattern.
+        if variable_radius:
+            self.constraints.append(
+                {
+                    "btType": "BTMSketchConstraint-2",
+                    "constraintType": "RADIUS",
+                    "entityId": f"{circle_id}.radius",
+                    "parameters": [
+                        {
+                            "btType": "BTMParameterString-149",
+                            "value": arc1_id,
+                            "parameterId": "localFirst",
+                        },
+                        {
+                            "btType": "BTMParameterQuantity-147",
+                            "expression": f"#{variable_radius}",
+                            "parameterId": "length",
+                            "isInteger": False,
+                        },
+                    ],
+                }
+            )
+        if variable_center:
+            vx, vy = variable_center
+            self.constraints.extend(
+                self._variable_center_constraints(
+                    entity_id=f"{circle_id}.center",
+                    prefix=f"{circle_id}.pos",
+                    variable_x=vx,
+                    variable_y=vy,
+                )
+            )
+
         return self
+
+    def _variable_center_constraints(
+        self,
+        entity_id: str,
+        prefix: str,
+        variable_x: str,
+        variable_y: str,
+    ) -> List[Dict[str, Any]]:
+        """Build HORIZONTAL + VERTICAL DISTANCE constraints from the sketch origin.
+
+        Distances are relative to Onshape's implicit sketch `origin` point,
+        with the x/y variable expressions driving them. Extracted as a helper
+        because add_arc will use the same pattern.
+        """
+        return [
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "DISTANCE",
+                "entityId": f"{prefix}.x",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": "origin",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": entity_id,
+                        "parameterId": "localSecond",
+                    },
+                    {
+                        "btType": "BTMParameterEnum-145",
+                        "value": "HORIZONTAL",
+                        "enumName": "DimensionDirection",
+                        "parameterId": "direction",
+                    },
+                    {
+                        "btType": "BTMParameterQuantity-147",
+                        "expression": f"#{variable_x}",
+                        "parameterId": "length",
+                        "isInteger": False,
+                    },
+                    {
+                        "btType": "BTMParameterEnum-145",
+                        "value": "ALIGNED",
+                        "enumName": "DimensionAlignment",
+                        "parameterId": "alignment",
+                    },
+                ],
+            },
+            {
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "DISTANCE",
+                "entityId": f"{prefix}.y",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": "origin",
+                        "parameterId": "localFirst",
+                    },
+                    {
+                        "btType": "BTMParameterString-149",
+                        "value": entity_id,
+                        "parameterId": "localSecond",
+                    },
+                    {
+                        "btType": "BTMParameterEnum-145",
+                        "value": "VERTICAL",
+                        "enumName": "DimensionDirection",
+                        "parameterId": "direction",
+                    },
+                    {
+                        "btType": "BTMParameterQuantity-147",
+                        "expression": f"#{variable_y}",
+                        "parameterId": "length",
+                        "isInteger": False,
+                    },
+                    {
+                        "btType": "BTMParameterEnum-145",
+                        "value": "ALIGNED",
+                        "enumName": "DimensionAlignment",
+                        "parameterId": "alignment",
+                    },
+                ],
+            },
+        ]
 
     def add_arc(
         self,
@@ -492,6 +627,8 @@ class SketchBuilder:
         start_angle: float = 0.0,
         end_angle: float = 180.0,
         is_construction: bool = False,
+        variable_radius: Optional[str] = None,
+        variable_center: Optional[Tuple[str, str]] = None,
     ) -> "SketchBuilder":
         """Add an arc to the sketch.
 
@@ -501,6 +638,12 @@ class SketchBuilder:
             start_angle: Start angle in degrees (0 = positive X direction)
             end_angle: End angle in degrees
             is_construction: Whether this is construction geometry
+            variable_radius: Optional variable name. When set, a RADIUS
+                constraint with expression `#<var>` drives the arc radius
+                from the variable table.
+            variable_center: Optional `(x_var, y_var)` variable names.
+                DISTANCE constraints from the sketch origin to the arc's
+                center drive the center position parametrically.
 
         Returns:
             Self for chaining
@@ -535,6 +678,38 @@ class SketchBuilder:
                 "isConstruction": is_construction,
             }
         )
+
+        if variable_radius:
+            self.constraints.append(
+                {
+                    "btType": "BTMSketchConstraint-2",
+                    "constraintType": "RADIUS",
+                    "entityId": f"{arc_id}.radius",
+                    "parameters": [
+                        {
+                            "btType": "BTMParameterString-149",
+                            "value": arc_id,
+                            "parameterId": "localFirst",
+                        },
+                        {
+                            "btType": "BTMParameterQuantity-147",
+                            "expression": f"#{variable_radius}",
+                            "parameterId": "length",
+                            "isInteger": False,
+                        },
+                    ],
+                }
+            )
+        if variable_center:
+            vx, vy = variable_center
+            self.constraints.extend(
+                self._variable_center_constraints(
+                    entity_id=f"{arc_id}.center",
+                    prefix=f"{arc_id}.pos",
+                    variable_x=vx,
+                    variable_y=vy,
+                )
+            )
 
         return self
 

@@ -243,6 +243,53 @@ class TestSketchBuilderCircle:
         assert sketch.entities[0]["isConstruction"] is True
         assert sketch.entities[1]["isConstruction"] is True
 
+    def test_add_circle_variable_radius_emits_radius_constraint(self):
+        """variable_radius adds a RADIUS dimensional constraint with `#<var>`."""
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1, variable_radius="holeR")
+
+        radius_constraints = [
+            c for c in sketch.constraints if c.get("constraintType") == "RADIUS"
+        ]
+        assert len(radius_constraints) == 1
+        rc = radius_constraints[0]
+        qty = next(
+            p for p in rc["parameters"]
+            if p.get("btType") == "BTMParameterQuantity-147"
+        )
+        assert qty["expression"] == "#holeR"
+        assert qty["parameterId"] == "length"
+
+    def test_add_circle_variable_center_emits_two_distance_constraints(self):
+        """variable_center emits a HORIZONTAL + VERTICAL DISTANCE from origin."""
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1, variable_center=("cx", "cy"))
+
+        dist = [c for c in sketch.constraints if c.get("constraintType") == "DISTANCE"]
+        assert len(dist) == 2
+        dirs = {
+            next(
+                p["value"] for p in c["parameters"]
+                if p.get("enumName") == "DimensionDirection"
+            ): next(
+                p["expression"] for p in c["parameters"]
+                if p.get("btType") == "BTMParameterQuantity-147"
+            )
+            for c in dist
+        }
+        assert dirs == {"HORIZONTAL": "#cx", "VERTICAL": "#cy"}
+
+    def test_add_circle_without_variables_emits_no_dim_constraints(self):
+        """Back-compat: calls that skip the new args don't gain spurious constraints."""
+        sketch = SketchBuilder()
+        sketch.add_circle(center=(0, 0), radius=1)
+        # The only constraints a plain circle creates are the two coincidents
+        # that close the two semicircles — no RADIUS or DISTANCE.
+        kinds = [c.get("constraintType") for c in sketch.constraints]
+        assert kinds.count("COINCIDENT") == 2
+        assert "RADIUS" not in kinds
+        assert "DISTANCE" not in kinds
+
 
 class TestSketchBuilderArc:
     """Test add_arc functionality."""
@@ -273,6 +320,38 @@ class TestSketchBuilderArc:
         sketch = SketchBuilder()
         sketch.add_arc(center=(0, 0), radius=1, is_construction=True)
         assert sketch.entities[0]["isConstruction"] is True
+
+    def test_add_arc_variable_radius_emits_radius_constraint(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(0, 0), radius=1, variable_radius="arcR")
+
+        radius_constraints = [
+            c for c in sketch.constraints if c.get("constraintType") == "RADIUS"
+        ]
+        assert len(radius_constraints) == 1
+        qty = next(
+            p for p in radius_constraints[0]["parameters"]
+            if p.get("btType") == "BTMParameterQuantity-147"
+        )
+        assert qty["expression"] == "#arcR"
+
+    def test_add_arc_variable_center_emits_two_distance_constraints(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(0, 0), radius=1, variable_center=("ax", "ay"))
+
+        dist = [c for c in sketch.constraints if c.get("constraintType") == "DISTANCE"]
+        assert len(dist) == 2
+        dirs = {
+            next(
+                p["value"] for p in c["parameters"]
+                if p.get("enumName") == "DimensionDirection"
+            ): next(
+                p["expression"] for p in c["parameters"]
+                if p.get("btType") == "BTMParameterQuantity-147"
+            )
+            for c in dist
+        }
+        assert dirs == {"HORIZONTAL": "#ax", "VERTICAL": "#ay"}
 
 
 class TestSketchBuilderLine:
