@@ -173,6 +173,96 @@ def _classify_vertex(vertex: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _in_range(value: Optional[float], rng: Optional[List[float]]) -> bool:
+    """Inclusive range check. Returns False if value is None AND a range is set."""
+    if rng is None:
+        return True
+    if value is None:
+        return False
+    lo, hi = rng[0], rng[1]
+    return lo <= value <= hi
+
+
+def _face_passes_filters(
+    face: Dict[str, Any],
+    *,
+    geometry_type: Optional[str],
+    outward_axis: Optional[str],
+    at_z_mm: Optional[float],
+    at_z_tol_mm: float,
+    radius_range_mm: Optional[List[float]],
+) -> bool:
+    if geometry_type is not None and (face.get("type") or "").upper() != geometry_type:
+        return False
+    if outward_axis is not None:
+        # Prefer outward_axis (body-outward), fall back to plane-defining
+        # normal_axis when the FS probe missed this face.
+        axis = face.get("outward_axis") or face.get("normal_axis")
+        if axis != outward_axis:
+            return False
+    if at_z_mm is not None:
+        origin = face.get("origin")
+        if origin is None:
+            return False
+        # origin is in meters; convert to mm for comparison.
+        z_mm = origin[2] * 1000.0
+        if abs(z_mm - at_z_mm) > at_z_tol_mm:
+            return False
+    if radius_range_mm is not None:
+        r = face.get("radius")
+        r_mm = r * 1000.0 if r is not None else None
+        if not _in_range(r_mm, radius_range_mm):
+            return False
+    return True
+
+
+def _edge_passes_filters(
+    edge: Dict[str, Any],
+    *,
+    geometry_type: Optional[str],
+    at_z_mm: Optional[float],
+    at_z_tol_mm: float,
+    radius_range_mm: Optional[List[float]],
+    length_range_mm: Optional[List[float]],
+) -> bool:
+    if geometry_type is not None and (edge.get("type") or "").upper() != geometry_type:
+        return False
+    if at_z_mm is not None:
+        mid = edge.get("midpoint")
+        if mid is None:
+            return False
+        z_mm = mid[2] * 1000.0
+        if abs(z_mm - at_z_mm) > at_z_tol_mm:
+            return False
+    if radius_range_mm is not None:
+        r = edge.get("radius")
+        r_mm = r * 1000.0 if r is not None else None
+        if not _in_range(r_mm, radius_range_mm):
+            return False
+    if length_range_mm is not None:
+        length = edge.get("length")
+        length_mm = length * 1000.0 if length is not None else None
+        if not _in_range(length_mm, length_range_mm):
+            return False
+    return True
+
+
+def _vertex_passes_filters(
+    vertex: Dict[str, Any],
+    *,
+    at_z_mm: Optional[float],
+    at_z_tol_mm: float,
+) -> bool:
+    if at_z_mm is not None:
+        pt = vertex.get("point")
+        if pt is None:
+            return False
+        z_mm = pt[2] * 1000.0
+        if abs(z_mm - at_z_mm) > at_z_tol_mm:
+            return False
+    return True
+
+
 _OUTWARD_NORMALS_FS = """
 function(context is Context, queries) {
     var out = {};
@@ -264,58 +354,147 @@ class EntityManager:
         *,
         kinds: Optional[List[str]] = None,
         body_index: Optional[int] = None,
+        geometry_type: Optional[str] = None,
+        outward_axis: Optional[str] = None,
+        at_z_mm: Optional[float] = None,
+        at_z_tol_mm: float = 0.5,
+        radius_range_mm: Optional[List[float]] = None,
+        length_range_mm: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """Return structured, enriched entity lists for all bodies in the PS.
 
+        Filters subset the entity lists BEFORE serialization so response
+        payloads stay manageable. Field-dogfood (Raspberry Pi case, 2-part)
+        saw raw responses hit 80–100 KB on moderately complex parts and
+        pushed Claude into pagination-style workarounds. Every filter is
+        independently optional; combine freely.
+
         Args:
             kinds: subset of {"faces", "edges", "vertices"}. Default: all.
-            body_index: 0-based index to limit to one body. Default: all bodies.
+            body_index: 0-based body to limit to. Default: all bodies.
+            geometry_type: case-insensitive match against the classified
+                `type` field. "PLANE" / "CYLINDER" / "CONE" / "TORUS" for
+                faces; "LINE" / "CIRCLE" / "ARC" for edges. Vertices have
+                no type so filtering one doesn't drop any vertex.
+            outward_axis: "+X" | "-X" | "+Y" | "-Y" | "+Z" | "-Z". Keeps only
+                faces whose classified `outward_axis` (body-outward) matches.
+                Falls back to `normal_axis` when the FS outward fetch missed
+                the face (degenerate/untessellated faces skip the FS probe).
+            at_z_mm: keep faces whose origin Z is within `at_z_tol_mm` mm of
+                this value; keep edges whose midpoint Z is within tolerance.
+                Units: millimeters.
+            at_z_tol_mm: tolerance around at_z_mm. Default 0.5 mm — tight
+                enough to discriminate adjacent features of a ~mm-thick wall.
+            radius_range_mm: [min_mm, max_mm] inclusive. Applies to faces
+                with a radius (cylinder/cone/torus) and edges with a radius
+                (circle/arc). Entities without a radius are dropped.
+            length_range_mm: [min_mm, max_mm] inclusive. Edges only; faces
+                have no length field.
 
-        Returns: {"bodies": [{"body_id", "body_type", "faces": [...], ...}], "summary": "..."}
+        Returns: {"bodies": [{"body_id", "body_type", "faces": [...], ...}],
+                 "summary": "...",
+                 "filters": { <echoed filter params, for debugging> },
+                 "original_counts": { body_id: {"faces": N, "edges": N, ...}},
+                 "filtered_counts": { body_id: {"faces": N, "edges": N, ...}}}.
 
         Faces carry both `normal_axis` (plane-defining normal, sometimes
         ambiguous between top and bottom of a flat body) and `outward_axis`
         (body-outward direction, fetched via FeatureScript). Pick by
         `outward_axis` whenever you mean "the face that points <direction>
-        away from the body" -- that's almost always what you actually want.
+        away from the body".
         """
         wanted = set(kinds) if kinds else {"faces", "edges", "vertices"}
+
+        normalized_geometry = (geometry_type or "").strip().upper() or None
+        normalized_axis = (outward_axis or "").strip() or None
+        if normalized_axis and normalized_axis not in {"+X", "-X", "+Y", "-Y", "+Z", "-Z"}:
+            raise ValueError(
+                f"outward_axis must be one of +X/-X/+Y/-Y/+Z/-Z, got {outward_axis!r}"
+            )
+        if radius_range_mm is not None and len(radius_range_mm) != 2:
+            raise ValueError("radius_range_mm must be a [min, max] pair")
+        if length_range_mm is not None and len(length_range_mm) != 2:
+            raise ValueError("length_range_mm must be a [min, max] pair")
+
         path = (
             f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/bodydetails"
         )
         raw = await self.client.get(path)
         bodies_raw = raw.get("bodies") or []
 
-        # Only pay for the outward-normal FS round-trip when faces are wanted.
         outward_normals: Dict[str, List[float]] = (
             await self._fetch_outward_normals(document_id, workspace_id, element_id)
             if "faces" in wanted
             else {}
         )
 
+        original_counts: Dict[str, Dict[str, int]] = {}
+        filtered_counts: Dict[str, Dict[str, int]] = {}
+
         out_bodies: List[Dict[str, Any]] = []
         for idx, body in enumerate(bodies_raw):
             if body_index is not None and idx != body_index:
                 continue
+            body_id = body.get("id") or f"idx{idx}"
+            raw_face_count = len(body.get("faces") or [])
+            raw_edge_count = len(body.get("edges") or [])
+            raw_vertex_count = len(body.get("vertices") or [])
+            original_counts[body_id] = {
+                "faces": raw_face_count,
+                "edges": raw_edge_count,
+                "vertices": raw_vertex_count,
+            }
+
             entry: Dict[str, Any] = {
                 "body_index": idx,
                 "body_id": body.get("id"),
                 "body_type": body.get("type"),
             }
             if "faces" in wanted:
-                entry["faces"] = [
+                classified = [
                     _classify_face(f, outward_normals)
                     for f in (body.get("faces") or [])
                 ]
+                entry["faces"] = [
+                    f for f in classified
+                    if _face_passes_filters(
+                        f,
+                        geometry_type=normalized_geometry,
+                        outward_axis=normalized_axis,
+                        at_z_mm=at_z_mm,
+                        at_z_tol_mm=at_z_tol_mm,
+                        radius_range_mm=radius_range_mm,
+                    )
+                ]
             if "edges" in wanted:
-                entry["edges"] = [_classify_edge(e) for e in (body.get("edges") or [])]
+                classified_edges = [_classify_edge(e) for e in (body.get("edges") or [])]
+                entry["edges"] = [
+                    e for e in classified_edges
+                    if _edge_passes_filters(
+                        e,
+                        geometry_type=normalized_geometry,
+                        at_z_mm=at_z_mm,
+                        at_z_tol_mm=at_z_tol_mm,
+                        radius_range_mm=radius_range_mm,
+                        length_range_mm=length_range_mm,
+                    )
+                ]
             if "vertices" in wanted:
-                entry["vertices"] = [
+                classified_verts = [
                     _classify_vertex(v) for v in (body.get("vertices") or [])
                 ]
+                entry["vertices"] = [
+                    v for v in classified_verts
+                    if _vertex_passes_filters(v, at_z_mm=at_z_mm, at_z_tol_mm=at_z_tol_mm)
+                ]
+
+            filtered_counts[body_id] = {
+                "faces": len(entry.get("faces", [])) if "faces" in wanted else 0,
+                "edges": len(entry.get("edges", [])) if "edges" in wanted else 0,
+                "vertices": len(entry.get("vertices", [])) if "vertices" in wanted else 0,
+            }
             out_bodies.append(entry)
 
-        # Build a compact summary for Claude's scratchpad.
         summary_lines: List[str] = []
         for b in out_bodies:
             fn = len(b.get("faces", [])) if "faces" in wanted else "-"
@@ -325,7 +504,20 @@ class EntityManager:
                 f"body[{b['body_index']}] id={b['body_id']} type={b['body_type']} "
                 f"faces={fn} edges={en} vertices={vn}"
             )
+        filters_echo = {
+            "kinds": sorted(wanted),
+            "body_index": body_index,
+            "geometry_type": normalized_geometry,
+            "outward_axis": normalized_axis,
+            "at_z_mm": at_z_mm,
+            "at_z_tol_mm": at_z_tol_mm if at_z_mm is not None else None,
+            "radius_range_mm": list(radius_range_mm) if radius_range_mm else None,
+            "length_range_mm": list(length_range_mm) if length_range_mm else None,
+        }
         return {
             "bodies": out_bodies,
             "summary": "\n".join(summary_lines) if summary_lines else "no bodies",
+            "filters": filters_echo,
+            "original_counts": original_counts,
+            "filtered_counts": filtered_counts,
         }
