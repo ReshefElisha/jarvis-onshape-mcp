@@ -407,6 +407,39 @@ class TestCreateExtrude:
         assert parsed["ok"] is False
         assert parsed["status"] == "EXCEPTION"
 
+    @pytest.mark.asyncio
+    @patch("onshape_mcp.server.apply_feature_and_check")
+    async def test_create_extrude_symmetric_end_type(self, mock_apply):
+        """endType=SYMMETRIC reaches the builder and lands in the payload."""
+        mock_apply.return_value = _mock_apply_result(feature_type="extrude")
+
+        await call_tool("create_extrude", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "sketchFeatureId": "sketch123", "depth": 10.0,
+            "endType": "SYMMETRIC",
+        })
+
+        payload = mock_apply.await_args[0][4]
+        sym_param = next(
+            p for p in payload["feature"]["parameters"]
+            if p["parameterId"] == "symmetric"
+        )
+        assert sym_param["value"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_extrude_invalid_end_type(self):
+        """Bad endType value -> EXCEPTION JSON."""
+        result = await call_tool("create_extrude", {
+            "documentId": "d", "workspaceId": "w", "elementId": "e",
+            "sketchFeatureId": "sketch123", "depth": 5.0,
+            "endType": "NOT_A_THING",
+        })
+        import json as _json
+        parsed = _json.loads(result[0].text)
+        assert parsed["ok"] is False
+        assert parsed["status"] == "EXCEPTION"
+        assert "endType" in (parsed["error_message"] or "")
+
 
 class TestCreateThicken:
     """Test the create_thicken tool handler (structured-JSON return)."""

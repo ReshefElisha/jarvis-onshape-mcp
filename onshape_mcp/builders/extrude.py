@@ -15,6 +15,28 @@ class ExtrudeType(Enum):
     INTERSECT = "INTERSECT"
 
 
+class ExtrudeEndType(Enum):
+    """End-condition for an extrude.
+
+    Values map to Onshape's public extrude feature spec. BLIND and
+    SYMMETRIC are the only ones confirmed wired through the builder —
+    THROUGH_ALL / UP_TO_FACE / UP_TO_VERTEX exist in Onshape but are
+    omitted here until a dogfooder needs them. (Live probe: the public
+    extrude feature rejects `endBound: SYMMETRIC` as "does not match its
+    feature spec"; it uses a simple boolean `symmetric: true` parameter
+    instead. The builder translates our enum into that boolean.)
+
+    BLIND: one-directional, `depth` is the extrusion length away from the
+        sketch plane (flipped by `opposite_direction`).
+    SYMMETRIC: `depth` is the TOTAL extrusion length centered on the sketch
+        plane — the body straddles the plane with depth/2 on each side.
+        `opposite_direction` has no effect on symmetric extrudes.
+    """
+
+    BLIND = "BLIND"
+    SYMMETRIC = "SYMMETRIC"
+
+
 class ExtrudeBuilder:
     """Builder for creating Onshape extrude features."""
 
@@ -25,6 +47,7 @@ class ExtrudeBuilder:
         depth: Union[float, int, str] = 1.0,
         operation_type: ExtrudeType = ExtrudeType.NEW,
         opposite_direction: bool = False,
+        end_type: ExtrudeEndType = ExtrudeEndType.BLIND,
     ):
         """Initialize extrude builder.
 
@@ -32,10 +55,14 @@ class ExtrudeBuilder:
             name: Name of the extrude feature
             sketch_feature_id: ID of the sketch to extrude
             depth: Extrude depth. Bare numbers default to millimeters; pass a
-                string like "1.5 in" for explicit units.
+                string like "1.5 in" for explicit units. For SYMMETRIC end
+                type this is the TOTAL length (body gets depth/2 each side).
             operation_type: Type of extrude operation
             opposite_direction: If True, extrude against the sketch normal.
                 Essential for REMOVE on a +Z face (cut into material, not air).
+                Ignored when end_type is SYMMETRIC.
+            end_type: BLIND (one-sided) or SYMMETRIC (both sides of sketch
+                plane). Defaults to BLIND for backwards compatibility.
         """
         self.name = name
         self.sketch_feature_id = sketch_feature_id
@@ -43,6 +70,7 @@ class ExtrudeBuilder:
         self.operation_type = operation_type
         self.depth_variable: Optional[str] = None
         self.opposite_direction = opposite_direction
+        self.end_type = end_type
 
     def set_depth(
         self,
@@ -140,6 +168,13 @@ class ExtrudeBuilder:
                         "btType": "BTMParameterBoolean-144",
                         "value": self.opposite_direction,
                         "parameterId": "oppositeDirection",
+                        "parameterName": "",
+                        "libraryRelationType": "NONE",
+                    },
+                    {
+                        "btType": "BTMParameterBoolean-144",
+                        "value": self.end_type == ExtrudeEndType.SYMMETRIC,
+                        "parameterId": "symmetric",
                         "parameterName": "",
                         "libraryRelationType": "NONE",
                     },
