@@ -215,6 +215,10 @@ class TestCreateSketchRectangle:
         assert isinstance(result[0], TextContent)
         import json as _json
         parsed = _json.loads(result[0].text)
+        # Verify the stable-contract fields. `hints` is also emitted by
+        # _feature_apply_json now (status-based next-action pointers); drop
+        # it from the equality check since its content rotates over time.
+        parsed.pop("hints", None)
         assert parsed == {
             "ok": True,
             "status": "OK",
