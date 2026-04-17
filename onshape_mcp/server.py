@@ -3686,7 +3686,23 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 element_id=arguments["elementId"],
                 script=arguments["script"],
             )
-            return [TextContent(type="text", text=f"FeatureScript result:\n{json.dumps(result, indent=2)}")]
+            # Surface parser/runtime notices upfront. The full result tree
+            # (BTFSValueMap-wrapped) is the primary payload but notices live
+            # at the top of the response and were getting visually buried
+            # mid-debug -- per the agent-SDK FS-frontier transcripts the
+            # actual diagnostic was already on the wire and just being
+            # ignored. See fs_notices.format_notices.
+            from onshape_mcp.api.fs_notices import format_notices
+            notices = result.get("notices") if isinstance(result, dict) else None
+            prefix = ""
+            if notices:
+                rendered = format_notices(notices)
+                if rendered:
+                    prefix = f"NOTICES ({len(notices)}):\n{rendered}\n\n"
+            return [TextContent(
+                type="text",
+                text=f"{prefix}FeatureScript result:\n{json.dumps(result, indent=2)}",
+            )]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=f"Error evaluating FeatureScript: API returned {e.response.status_code}.")]
         except Exception as e:

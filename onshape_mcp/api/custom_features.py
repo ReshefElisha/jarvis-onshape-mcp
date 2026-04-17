@@ -45,6 +45,7 @@ from loguru import logger
 
 from .client import OnshapeClient
 from .feature_apply import FeatureApplyResult, apply_feature_and_check
+from .fs_notices import extract_fs_body, fetch_body_notices, format_notices
 
 
 # Current FS language version. The SAME number must appear in the uploaded
@@ -298,6 +299,34 @@ class CustomFeatureManager:
             feature_name=feature_name,
             parameters=parameters,
         )
+
+        # FS-error enrichment: when the feature compiled but failed at REGEN,
+        # `apply_result.error_message` only carries the opaque enum
+        # ("REGEN_ERROR (ERROR)"). Re-evaluate the body of the user's
+        # defineFeature inline via /featurescript -- that endpoint streams
+        # `notices[]` carrying the actual diagnostic ("Function opThisDoesNotExist
+        # with 3 argument(s) not found"). Best-effort; a failed enrichment
+        # leaves the original error_message untouched. See fs_notices.py and
+        # scratchpad/fs-failure-evidence.md.
+        if not apply_result.ok:
+            try:
+                body = extract_fs_body(feature_script)
+                if body:
+                    notices = await fetch_body_notices(
+                        self.client,
+                        document_id,
+                        workspace_id,
+                        part_studio_element_id,
+                        body,
+                    )
+                    rendered = format_notices(notices)
+                    if rendered:
+                        base = apply_result.error_message or ""
+                        apply_result.error_message = (
+                            f"{base}\nFS NOTICES:\n{rendered}".lstrip()
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"FS body re-eval enrichment failed: {e}")
 
         return {
             "apply_result": apply_result,
