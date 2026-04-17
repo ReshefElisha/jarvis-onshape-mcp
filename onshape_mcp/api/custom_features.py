@@ -51,7 +51,9 @@ from .feature_apply import FeatureApplyResult, apply_feature_and_check
 # source's `FeatureScript <N>;` prelude AND every `import(..., version : "<N>.0")`
 # statement. Bump this when Onshape ships a newer std library — or call
 # `discover_fs_version()` at runtime to pull the live value.
-DEFAULT_FS_VERSION = "2909"
+# 2931 verified via peer e288nu7l's FS-frontier dogfood (threaded boss); 2909
+# was stale by 22 versions as of 2026-04-17.
+DEFAULT_FS_VERSION = "2931"
 
 # Onshape's public standard library document. Latest version entry = current
 # FS library version. See `discover_fs_version()`.
