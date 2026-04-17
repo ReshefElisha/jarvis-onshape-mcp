@@ -60,16 +60,22 @@ def _nearest_axis_label(v: Optional[List[float]]) -> Optional[str]:
 
 def _classify_face(
     face: Dict[str, Any],
-    outward_normals: Optional[Dict[str, List[float]]] = None,
+    face_frames: Optional[Dict[str, Dict[str, List[float]]]] = None,
 ) -> Dict[str, Any]:
     """Extract human-friendly shape from a BTExportModelFace entry.
 
-    `outward_normals` (face_id -> [x,y,z]) carries the body-outward direction
-    fetched via FeatureScript. The bodydetails REST surface only exposes the
-    plane's *defining* normal, which on a body's bottom face still reads as
-    the plane's local +Z even though the body-outward direction is -Z. That
-    ambiguity caused silent no-op cuts in the field (dogfooder's bug #2).
-    Picking by `outward_axis` instead of `normal_axis` resolves it.
+    `face_frames` (face_id -> {"normal", "x", "y"}) carries the body-outward
+    frame fetched via FeatureScript (`evFaceTangentPlane`). The bodydetails
+    REST surface only exposes the plane's *defining* normal, which on a
+    body's bottom face still reads as the plane's local +Z even though the
+    body-outward direction is -Z. Picking by `outward_axis` instead of
+    `normal_axis` resolves that ambiguity.
+
+    For planar faces the FS probe also gives us the plane's in-plane U / V
+    axes in world coordinates; we surface those as `sketch_x_world` /
+    `sketch_y_world` so the caller knows how an `(x, y)` sketch coordinate
+    on this face maps to world space. "Sketching on vertical side faces
+    was guesswork" was a direct dogfood complaint this fixes.
     """
     surface = face.get("surface") or {}
     stype = (surface.get("type") or "").upper() or "OTHER"
@@ -83,8 +89,13 @@ def _classify_face(
     normal_label = _nearest_axis_label(normal) if stype == "PLANE" else None
 
     face_id = face.get("id") or ""
-    outward = (outward_normals or {}).get(face_id) if outward_normals else None
+    frame = (face_frames or {}).get(face_id) if face_frames else None
+    outward = frame.get("normal") if frame else None
+    sketch_x = frame.get("x") if frame else None
+    sketch_y = frame.get("y") if frame else None
     outward_label = _nearest_axis_label(outward) if outward is not None else None
+    sketch_x_label = _nearest_axis_label(sketch_x) if sketch_x is not None else None
+    sketch_y_label = _nearest_axis_label(sketch_y) if sketch_y is not None else None
 
     desc_parts: List[str] = [stype.lower()]
     # Prefer the outward-facing label in the description: it's what the LLM
@@ -94,6 +105,11 @@ def _classify_face(
         desc_parts.append(f"outward {outward_label}")
     elif normal_label:
         desc_parts.append(f"normal {normal_label}")
+    # Surface sketch-frame labels on planar faces. Only render when both
+    # axes map cleanly to a world-axis (so we never lie about a face whose
+    # U/V lands halfway between X and Y).
+    if stype == "PLANE" and sketch_x_label and sketch_y_label:
+        desc_parts.append(f"sketch-x={sketch_x_label} sketch-y={sketch_y_label}")
     if origin is not None:
         desc_parts.append(
             f"origin ({origin[0]*1000:.1f},{origin[1]*1000:.1f},{origin[2]*1000:.1f}) mm"
@@ -109,6 +125,10 @@ def _classify_face(
         "normal_axis": normal_label,
         "outward_normal": outward,
         "outward_axis": outward_label,
+        "sketch_x_world": sketch_x if stype == "PLANE" else None,
+        "sketch_y_world": sketch_y if stype == "PLANE" else None,
+        "sketch_x_axis": sketch_x_label if stype == "PLANE" else None,
+        "sketch_y_axis": sketch_y_label if stype == "PLANE" else None,
         "axis": axis,
         "radius": radius,
         "description": " / ".join(desc_parts),
@@ -263,7 +283,7 @@ def _vertex_passes_filters(
     return True
 
 
-_OUTWARD_NORMALS_FS = """
+_FACE_FRAMES_FS = """
 function(context is Context, queries) {
     var out = {};
     var faces = evaluateQuery(context, qOwnedByBody(qAllNonMeshSolidBodies(), EntityType.FACE));
@@ -274,7 +294,17 @@ function(context is Context, queries) {
                 "face": face,
                 "parameter": vector(0.5, 0.5)
             });
-            out[faceId] = [plane.normal[0], plane.normal[1], plane.normal[2]];
+            // Plane struct carries origin/normal/x; Y axis is derived via
+            // right-hand rule so the sketch frame is orthonormal.
+            var yAxis = cross(plane.normal, plane.x);
+            // Pack as a flat 9-element vector [nx, ny, nz, xx, xy, xz, yx, yy, yz]
+            // so the response parser only has to handle one value-kind
+            // (BTFSValueArray of numbers) per face.
+            out[faceId] = [
+                plane.normal[0], plane.normal[1], plane.normal[2],
+                plane.x[0], plane.x[1], plane.x[2],
+                yAxis[0], yAxis[1], yAxis[2]
+            ];
         } catch (e) {
             // Non-evaluable faces (degenerate, parametrically odd) -- skip;
             // caller falls back to plane-defining normal_axis.
@@ -285,14 +315,18 @@ function(context is Context, queries) {
 """.strip()
 
 
-def _parse_fs_outward_map(fs_response: Dict[str, Any]) -> Dict[str, List[float]]:
-    """Pull face_id -> [x,y,z] out of an FSValueMap response.
+def _parse_fs_frame_map(
+    fs_response: Dict[str, Any],
+) -> Dict[str, Dict[str, List[float]]]:
+    """Pull face_id -> {normal, x, y} out of an FSValueMap response.
 
-    Onshape returns FS map values as a list of `{key: {value: <id>}, value: {value: [{value: x}, ...]}}`
-    entries under `result.value`. Tolerant of unexpected shapes -- anything we
-    can't parse just gets skipped, so a malformed entry never blocks the rest.
+    Onshape returns FS map values as a list of `{key: {value: <id>}, value:
+    {value: [{value: n}, ...]}}` entries under `result.value`. The FS script
+    packs each face's frame as a flat 9-element array; we unpack here.
+    Tolerant of unexpected shapes — anything malformed gets skipped so one
+    bad face never blocks the rest.
     """
-    out: Dict[str, List[float]] = {}
+    out: Dict[str, Dict[str, List[float]]] = {}
     result = fs_response.get("result") or {}
     entries = result.get("value") if isinstance(result.get("value"), list) else []
     for ent in entries:
@@ -302,15 +336,20 @@ def _parse_fs_outward_map(fs_response: Dict[str, Any]) -> Dict[str, List[float]]
             continue
         val_obj = ent.get("value") if isinstance(ent, dict) else None
         comp_list = val_obj.get("value") if isinstance(val_obj, dict) else None
-        if not isinstance(comp_list, list) or len(comp_list) != 3:
+        if not isinstance(comp_list, list) or len(comp_list) != 9:
             continue
         comps: List[float] = []
         for c in comp_list:
             v = c.get("value") if isinstance(c, dict) else c
             if isinstance(v, (int, float)):
                 comps.append(float(v))
-        if len(comps) == 3:
-            out[face_id] = comps
+        if len(comps) != 9:
+            continue
+        out[face_id] = {
+            "normal": comps[0:3],
+            "x": comps[3:6],
+            "y": comps[6:9],
+        }
     return out
 
 
@@ -325,24 +364,27 @@ class EntityManager:
     def __init__(self, client: OnshapeClient):
         self.client = client
 
-    async def _fetch_outward_normals(
+    async def _fetch_face_frames(
         self, document_id: str, workspace_id: str, element_id: str
-    ) -> Dict[str, List[float]]:
-        """Run FeatureScript to get face_id -> body-outward normal vector.
+    ) -> Dict[str, Dict[str, List[float]]]:
+        """Run FeatureScript to get face_id -> {normal, x, y} world-frame.
 
-        evFaceTangentPlane returns the tangent plane whose normal is the
-        face's outward direction (verified empirically against a 40x30x10
-        plate: bottom face has plane-normal +Z but outward -Z).
+        `evFaceTangentPlane` returns a BTPlane with `.normal` (body-outward
+        direction), `.x` (in-plane U axis), and `.y` (in-plane V axis). All
+        three are world-space unit vectors. We pull them for every face so
+        a caller sketching on a vertical side face can map `(sx, sy)` in
+        sketch coords to `sx * plane.x + sy * plane.y + origin` in world
+        coords — no more "sketch X goes... which way on this face?"
 
         Returns an empty dict on failure so the caller can fall back to
-        plane-defining normals; outward enrichment is best-effort.
+        plane-defining normals; frame enrichment is best-effort.
         """
         path = (
             f"/api/v8/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/featurescript"
         )
         try:
-            resp = await self.client.post(path, data={"script": _OUTWARD_NORMALS_FS})
-            return _parse_fs_outward_map(resp)
+            resp = await self.client.post(path, data={"script": _FACE_FRAMES_FS})
+            return _parse_fs_frame_map(resp)
         except Exception:  # noqa: BLE001
             return {}
 
@@ -422,8 +464,8 @@ class EntityManager:
         raw = await self.client.get(path)
         bodies_raw = raw.get("bodies") or []
 
-        outward_normals: Dict[str, List[float]] = (
-            await self._fetch_outward_normals(document_id, workspace_id, element_id)
+        face_frames: Dict[str, Dict[str, List[float]]] = (
+            await self._fetch_face_frames(document_id, workspace_id, element_id)
             if "faces" in wanted
             else {}
         )
@@ -452,7 +494,7 @@ class EntityManager:
             }
             if "faces" in wanted:
                 classified = [
-                    _classify_face(f, outward_normals)
+                    _classify_face(f, face_frames)
                     for f in (body.get("faces") or [])
                 ]
                 entry["faces"] = [
