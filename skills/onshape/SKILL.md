@@ -38,6 +38,112 @@ After every feature that creates or modifies visible geometry:
 
 Text checks catch arithmetic and counting errors (my weak spot). Image checks catch orientation and topology errors. Neither alone is sufficient.
 
+## Sketches: coordinate-first vs constraint-first
+
+`create_sketch` has two surfaces. The right one depends on what you're
+modeling.
+
+### Coordinate-first (simple sketches, 1-3 primitives)
+
+Pass entity dicts without `id` and no `constraints`. Positions are what
+you type.
+
+```json
+{
+  "entities": [
+    {"type": "circle", "center": [0, 0], "radius": "25 mm"},
+    {"type": "circle", "center": [100, 0], "radius": "12 mm"}
+  ]
+}
+```
+
+Fast. Use for mounting plates, single holes, obvious rectangles. Don't
+use this when the drawing specifies tangencies, concentricities, or
+dimensional chains — the solver makes those easy, hand-computed
+coordinates don't round-trip cleanly.
+
+### Constraint-first (drawing transcription)
+
+Give each entity a user-level `id`, list `constraints`. Onshape's
+solver resolves positions from the constraints.
+
+```json
+{
+  "entities": [
+    {"id": "hub",   "type": "circle", "center": [0, 0],   "radius": "25 mm"},
+    {"id": "tip",   "type": "circle", "center": [100, 0], "radius": "12 mm"},
+    {"id": "upper", "type": "line",   "start": [0, 25], "end": [100, 12]}
+  ],
+  "constraints": [
+    {"type": "DIAMETER", "entity": "hub", "value": "50 mm"},
+    {"type": "DIAMETER", "entity": "tip", "value": "24 mm"},
+    {"type": "DISTANCE", "entities": ["hub.center", "tip.center"], "value": "100 mm", "direction": "HORIZONTAL"},
+    {"type": "COINCIDENT", "entities": ["upper.start", "hub"]},
+    {"type": "COINCIDENT", "entities": ["upper.end", "tip"]},
+    {"type": "TANGENT", "entities": ["upper", "hub"]},
+    {"type": "TANGENT", "entities": ["upper", "tip"]}
+  ]
+}
+```
+
+Entity refs are ids with optional sub-point suffixes: `line.start`,
+`line.end`, `circle.center`, `arc.center`. Seed positions (center,
+radius on circles/arcs; start/end on lines are optional) are just
+solver starting guesses — the constraints drive final geometry.
+
+### 14 constraint types
+
+Entity-ref only (no value): `HORIZONTAL`, `VERTICAL` (lines only),
+`COINCIDENT`, `TANGENT`, `CONCENTRIC`, `PARALLEL`, `PERPENDICULAR`,
+`EQUAL`, `MIDPOINT`.
+
+Dimensioned (require `value`): `DIAMETER`, `RADIUS`,
+`DISTANCE` (with `direction`: `MINIMUM | HORIZONTAL | VERTICAL`),
+`ANGLE` (value in degrees default; `"90 deg"` / `"1.57 rad"` for units).
+
+Binary pair: `OFFSET` (offset entity ↔ master; pair with a `DISTANCE`
+constraint on the same two entities for the offset length).
+
+Aliases: `HORIZONTAL_DISTANCE` → `DISTANCE(direction=HORIZONTAL)`,
+`VERTICAL_DISTANCE` → `DISTANCE(direction=VERTICAL)`. `POINT_ON` is
+rejected — use `COINCIDENT` with a point sub-ref.
+
+### Gotchas
+
+- **HORIZONTAL/VERTICAL work on LINE entities only.** On a POINT
+  (like `hub.center`), use `DISTANCE(direction=VERTICAL, value="0 mm")`
+  to pin to the horizontal axis.
+- **Circle + arc seeds are required.** Onshape's solver needs a
+  starting guess even when DIAMETER/RADIUS will drive final values.
+- **Entity IDs must be unique within a sketch.** Duplicate id → raise.
+- **Sub-point refs aren't validated.** `circle.start` makes no sense
+  but the builder won't catch it; Onshape rejects at solve time.
+- **Over-constraint surfaces as `SKETCH_UNSOLVABLE_CONSTRAINT`
+  WARNING.** Feature still persists, but geometry is wrong. Look at
+  the constraint list and drop a redundant one.
+
+### Iteration with edit_sketch
+
+Don't delete-and-rebuild a sketch. `edit_sketch` takes a
+`sketchFeatureId` + `addEntities` / `addConstraints` / `removeIds`
+and splices.
+
+```json
+edit_sketch({
+  "sketchFeatureId": "Fabc_0",
+  "addEntities": [{"id": "bore", "type": "circle", "center": [0,0], "radius": "18 mm"}],
+  "addConstraints": [
+    {"id": "d_bore", "type": "DIAMETER", "entity": "bore", "value": "36 mm"},
+    {"id": "c_bore", "type": "CONCENTRIC", "entities": ["bore", "hub"]}
+  ]
+})
+```
+
+Removing an entity cascades: any constraint referencing it (directly
+or via sub-point) gets auto-dropped and reported in
+`cascaded_removals: [{constraint_id, referenced}]`. Read that field
+— otherwise a silent 48→12 constraint scrub bites three turns later.
+
 ## The entity-first protocol
 
 **Never** sketch on a face, fillet an edge, chamfer an edge, or mate to a face without calling `list_entities` or `describe_part_studio` first and picking the entity by reading its description.
