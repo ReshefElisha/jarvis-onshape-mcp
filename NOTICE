@@ -2,9 +2,8 @@ claude-onshape-mcp
 ==================
 
 This project was started as a fork of https://github.com/hedless/onshape-mcp
-at commit 54d21cc (2026), authored by hedless. The upstream project was
-published publicly without a declared license; this redistribution is in
-good faith and would be revoked on request.
+at commit 54d21cc (2026), authored by hedless. The upstream README declares
+"MIT License"; this fork is redistributed under the same MIT terms.
 
 Thanks to hedless for the initial scaffolding: the Onshape REST client
 + HMAC auth, the core BTMFeature-134 / BTMParameterQuantity-147 /
