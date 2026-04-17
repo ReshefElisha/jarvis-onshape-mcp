@@ -724,101 +724,31 @@ class SketchBuilder:
 
         circle_id = self._generate_entity_id("circle")
 
-        # Full circles require two semicircular arcs to form a closed region.
-        # A single BTMSketchCurveSegment with startParam=0 and endParam=2π
-        # is accepted by Onshape but doesn't render or create a sketch region.
-        arc1_id = f"{circle_id}.arc1"
-        arc2_id = f"{circle_id}.arc2"
-
-        # First semicircle: 0 to π
+        # Single-entity circle (BTMSketchCurve-4 with BTCurveGeometryCircle-115
+        # geometry) matches UI-built sketches. Replaces the legacy
+        # two-semicircle workaround — the previous BTMSketchCurveSegment-155
+        # full-circle form didn't render, but BTMSketchCurve-4 does.
+        # Critical side-effect: `circle.N.center` now resolves to the
+        # circle's center point for downstream constraints (unblocks
+        # variable_center + any COINCIDENT/CONCENTRIC ref).
         self.entities.append(
             {
-                "btType": "BTMSketchCurveSegment-155",
-                "entityId": arc1_id,
-                "startPointId": f"{circle_id}.start",
-                "endPointId": f"{circle_id}.mid",
-                "startParam": 0.0,
-                "endParam": math.pi,
+                "btType": "BTMSketchCurve-4",
+                "entityId": circle_id,
+                "centerId": f"{circle_id}.center",
                 "geometry": {
                     "btType": "BTCurveGeometryCircle-115",
+                    "clockwise": False,
                     "radius": radius_m,
                     "xCenter": cx_m,
                     "yCenter": cy_m,
                     "xDir": 1.0,
                     "yDir": 0.0,
-                    "clockwise": False,
                 },
-                "centerId": f"{circle_id}.center",
                 "isConstruction": is_construction,
             }
         )
 
-        # Second semicircle: π to 2π
-        self.entities.append(
-            {
-                "btType": "BTMSketchCurveSegment-155",
-                "entityId": arc2_id,
-                "startPointId": f"{circle_id}.mid",
-                "endPointId": f"{circle_id}.start",
-                "startParam": math.pi,
-                "endParam": 2.0 * math.pi,
-                "geometry": {
-                    "btType": "BTCurveGeometryCircle-115",
-                    "radius": radius_m,
-                    "xCenter": cx_m,
-                    "yCenter": cy_m,
-                    "xDir": 1.0,
-                    "yDir": 0.0,
-                    "clockwise": False,
-                },
-                "centerId": f"{circle_id}.center",
-                "isConstruction": is_construction,
-            }
-        )
-
-        # Coincident constraints to close the circle
-        self.constraints.append(
-            {
-                "btType": "BTMSketchConstraint-2",
-                "constraintType": "COINCIDENT",
-                "entityId": f"{circle_id}.close1",
-                "parameters": [
-                    {
-                        "btType": "BTMParameterString-149",
-                        "value": f"{arc1_id}.end",
-                        "parameterId": "localFirst",
-                    },
-                    {
-                        "btType": "BTMParameterString-149",
-                        "value": f"{arc2_id}.start",
-                        "parameterId": "localSecond",
-                    },
-                ],
-            }
-        )
-        self.constraints.append(
-            {
-                "btType": "BTMSketchConstraint-2",
-                "constraintType": "COINCIDENT",
-                "entityId": f"{circle_id}.close2",
-                "parameters": [
-                    {
-                        "btType": "BTMParameterString-149",
-                        "value": f"{arc2_id}.end",
-                        "parameterId": "localFirst",
-                    },
-                    {
-                        "btType": "BTMParameterString-149",
-                        "value": f"{arc1_id}.start",
-                        "parameterId": "localSecond",
-                    },
-                ],
-            }
-        )
-
-        # Optional dimensional constraints that reference a variable. Variables
-        # are prefixed with "#" in Onshape's expression parser, matching the
-        # rectangle LENGTH constraint pattern.
         if variable_radius:
             self.constraints.append(
                 {
@@ -828,7 +758,7 @@ class SketchBuilder:
                     "parameters": [
                         {
                             "btType": "BTMParameterString-149",
-                            "value": arc1_id,
+                            "value": circle_id,
                             "parameterId": "localFirst",
                         },
                         {
@@ -853,6 +783,30 @@ class SketchBuilder:
 
         return self
 
+    # Collision-proof sketch-local origin point id. When `variable_center`
+    # is used the builder injects a BTMSketchPoint-158 at (0,0) with this
+    # id, and DISTANCE constraints reference it instead of the phantom
+    # "origin" string. Same pattern callers of the constraint-first
+    # surface are now expected to use explicitly.
+    _ORIGIN_POINT_ID = "_sketch_origin_point"
+
+    def _ensure_origin_point(self) -> str:
+        """Add a sketch-local origin BTMSketchPoint-158 if not already present.
+
+        Returns the point id (always `_sketch_origin_point`). Idempotent.
+        """
+        if not any(e.get("entityId") == self._ORIGIN_POINT_ID for e in self.entities):
+            self.entities.append(
+                {
+                    "btType": "BTMSketchPoint-158",
+                    "entityId": self._ORIGIN_POINT_ID,
+                    "x": 0.0,
+                    "y": 0.0,
+                    "isConstruction": True,
+                }
+            )
+        return self._ORIGIN_POINT_ID
+
     def _variable_center_constraints(
         self,
         entity_id: str,
@@ -860,30 +814,16 @@ class SketchBuilder:
         variable_x: str,
         variable_y: str,
     ) -> List[Dict[str, Any]]:
-        """Build HORIZONTAL + VERTICAL DISTANCE constraints from the sketch origin.
+        """Build HORIZONTAL + VERTICAL DISTANCE constraints from a sketch-local
+        origin point to the target entity.
 
-        Distances are relative to Onshape's implicit sketch `origin` point,
-        with the x/y variable expressions driving them. Extracted as a helper
-        because add_arc will use the same pattern.
-
-        STATUS 2026-04-17: **broken**. `localFirst: "origin"` does not resolve
-        to any local sketch entity -- confirmed by
-        `sketchEntityQuery(sketchId, EntityType.VERTEX, "origin")` returning
-        zero vertices. Every sketch that uses this helper comes back with
-        `featureStatus: WARNING` and `SKETCH_MISSING_LOCAL_REFERENCE`, and
-        the center is never actually driven by the variable. The seed
-        geometry is the only thing holding it in place.
-
-        Correct fix (not yet implemented): replace `localFirst/localSecond`
-        with `externalFirst` carrying a BTMIndividualQuery of the Part
-        Studio's Origin feature. That needs the Onshape-UI constraint
-        payload format; investigation notes in
-        `scratchpad/signed-variable-center-investigation.md`.
-
-        Until fixed, use literal coordinates with explicit `#var` /
-        `#minus_var` expressions instead of `variable_center`. See the
-        "Known-broken: variableCenter" entry in SKILL.md.
+        Previously emitted `localFirst: "origin"` — a phantom string Onshape
+        never resolved, leaving every sketch with SKETCH_MISSING_LOCAL_REFERENCE
+        WARNING and a parametrically unbound center. Fixed by injecting a
+        real BTMSketchPoint-158 at (0,0) via `_ensure_origin_point()` and
+        referencing it by id.
         """
+        origin_id = self._ensure_origin_point()
         return [
             {
                 "btType": "BTMSketchConstraint-2",
@@ -892,7 +832,7 @@ class SketchBuilder:
                 "parameters": [
                     {
                         "btType": "BTMParameterString-149",
-                        "value": "origin",
+                        "value": origin_id,
                         "parameterId": "localFirst",
                     },
                     {
@@ -927,7 +867,7 @@ class SketchBuilder:
                 "parameters": [
                     {
                         "btType": "BTMParameterString-149",
-                        "value": "origin",
+                        "value": origin_id,
                         "parameterId": "localFirst",
                     },
                     {
