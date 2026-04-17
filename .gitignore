@@ -80,3 +80,24 @@ dev_scripts/
 .worktrees/
 .security-key
 logs/security/
+
+# Credentials
+.env
+.env.*
+!.env.example
+
+# Local development artifacts
+scratchpad/
+agent-sdk-runs/
+agent-runs/
+cad-tests/
+*.log
+
+# Coverage + test artifacts
+coverage.json
+coverage.xml
+.coverage
+htmlcov/
+
+# OS
+.DS_Store

@@ -1,0 +1,32 @@
+{
+  "name": "onshape-mcp",
+  "version": "1.0.0",
+  "description": "Let Claude drive real Onshape CAD — sketches, extrudes, fillets, mates, parametric iteration, FeatureScript custom features. Structured truth-telling on every mutation, multi-view renders, per-feature geometric diffs.",
+  "author": {
+    "name": "Reshef Elisha",
+    "url": "https://github.com/ReshefElisha"
+  },
+  "repository": "https://github.com/ReshefElisha/claude-onshape-mcp",
+  "license": "MIT",
+  "keywords": ["onshape", "cad", "mcp", "claude", "featurescript", "parametric", "3d", "stl", "step"],
+  "userConfig": {
+    "ONSHAPE_API_KEY": {
+      "description": "Onshape API access key. Get one at https://dev-portal.onshape.com/ (the 'Access Key' value when you create an API key pair).",
+      "sensitive": true
+    },
+    "ONSHAPE_API_SECRET": {
+      "description": "Onshape API secret key (the 'Secret Key' shown once when you create the API key pair).",
+      "sensitive": true
+    }
+  },
+  "mcpServers": {
+    "onshape": {
+      "command": "uv",
+      "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}", "run", "onshape-mcp"],
+      "env": {
+        "ONSHAPE_API_KEY": "${user_config.ONSHAPE_API_KEY}",
+        "ONSHAPE_API_SECRET": "${user_config.ONSHAPE_API_SECRET}"
+      }
+    }
+  }
+}

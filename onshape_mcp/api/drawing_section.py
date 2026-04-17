@@ -1,11 +1,10 @@
 """Drawing-based section-view renderer — STUB / WIP.
 
 STATUS 2026-04-16: BLOCKED by Onshape platform. `render_section` raises
-NotImplementedError. See `scratchpad/drawing-section-research.md` for the full
-research trail and the three independent confirmations that Onshape's public
-REST API does not (as of rel-1.213, 2026-04-03) support creating Section /
-Detail / Auxiliary views via `/drawings/.../modify`. Only `TopLevel` and
-`Projected` view types are creatable today. Docs quote:
+NotImplementedError. Onshape's public REST API does not (as of rel-1.213,
+2026-04-03) support creating Section / Detail / Auxiliary views via
+`/drawings/.../modify`. Only `TopLevel` and `Projected` view types are
+creatable today. Docs quote:
 
     "Currently, only `TopLevel` and `Projected` view types are supported for
     creating and editing via the Onshape API."
@@ -39,9 +38,6 @@ support, the only change needed is to add the section-view modify payload to
 chain the existing methods.
 
 ## Reference
-- scratchpad/drawing-section-research.md  — full trail, primary sources,
-  probe doc id (e7738d10a4cc9b6b6a77c7c9, left for inspection), every
-  viewType string tested and exact error returned.
 - Onshape docs: https://onshape-public.github.io/docs/api-adv/drawings/
 """
 
