@@ -1,12 +1,14 @@
 [project]
 name = "onshape-mcp"
-version = "0.3.0"
-description = "Enhanced MCP server for programmatic CAD modeling with Onshape"
+version = "1.0.0"
+description = "Claude Code plugin for driving Onshape CAD via MCP — truth-telling, vision, entity discovery, parametric iteration, FeatureScript"
 authors = [
-    {name = "hedless", email = "your-email@example.com"}
+    {name = "Reshef Elisha"}
 ]
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+keywords = ["onshape", "cad", "mcp", "claude", "featurescript", "parametric"]
 dependencies = [
     "mcp>=0.1.0",
     "httpx>=0.27.0",
@@ -16,7 +18,6 @@ dependencies = [
     "uvicorn>=0.23.0",
     "loguru>=0.7.0",
     "pillow>=10.0.0",
-    "google-genai>=1.0.0",
     "anthropic>=0.96.0",
     "claude-agent-sdk>=0.1.61",
 ]
@@ -48,7 +49,6 @@ target-version = "py310"
 [tool.ruff.lint.per-file-ignores]
 # load_dotenv() must run before local imports read env vars
 "onshape_mcp/server.py" = ["E402"]
-"run_mcp_server.py" = ["E402"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
