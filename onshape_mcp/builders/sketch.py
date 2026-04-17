@@ -35,6 +35,124 @@ class SketchPlane(Enum):
     RIGHT = "Right"
 
 
+def serialize_entity_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Turn a user-level entity spec dict into a BTMSketch-151 entity.
+
+    Pure function used by both SketchBuilder.add_entity_spec (for atomic
+    create_sketch) and sketch_edit (for edit_sketch addEntities). Kept
+    outside the class so the two paths never diverge in what a user-facing
+    spec means on the wire.
+
+    Supported spec shapes:
+      {"type": "line",   "id": "upper", "start": [x,y], "end": [x,y], "construction": False}
+      {"type": "circle", "id": "hub",   "center": [x,y], "radius": "25 mm"}
+      {"type": "arc",    "id": "fillet","center": [x,y], "radius": "5 mm",
+                         "start_angle": "0 deg", "end_angle": "90 deg"}
+      {"type": "point",  "id": "origin","at": [x,y]}
+
+    `id` is required and becomes the wire-level `entityId`.
+    Sub-points derive from it: `line.start`, `line.end`, `circle.center`.
+    For lines, start/end default to [0,0] if omitted (solver resolves).
+    For circles/arcs, center + radius seeds are required (Onshape needs
+    a starting guess even when DIAMETER / RADIUS constraints will drive
+    the final values).
+    """
+    if "id" not in spec:
+        raise ValueError(f"entity spec missing required 'id': {spec}")
+    entity_id = spec["id"]
+    etype = (spec.get("type") or "").lower()
+    construction = bool(spec.get("construction") or spec.get("isConstruction"))
+
+    if etype == "line":
+        start = spec.get("start") or [0.0, 0.0]
+        end = spec.get("end") or [0.0, 0.0]
+        sx, sy = _to_meters(start[0]), _to_meters(start[1])
+        ex, ey = _to_meters(end[0]), _to_meters(end[1])
+        dx, dy = ex - sx, ey - sy
+        length = math.sqrt(dx * dx + dy * dy) or 1.0
+        return {
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": entity_id,
+            "startPointId": f"{entity_id}.start",
+            "endPointId": f"{entity_id}.end",
+            "startParam": 0.0,
+            "endParam": length,
+            "geometry": {
+                "btType": "BTCurveGeometryLine-117",
+                "pntX": sx,
+                "pntY": sy,
+                "dirX": dx / length,
+                "dirY": dy / length,
+            },
+            "centerId": "",
+            "isConstruction": construction,
+        }
+    if etype == "circle":
+        if "center" not in spec or "radius" not in spec:
+            raise ValueError(
+                f"circle spec {entity_id!r} needs center + radius seeds "
+                "(even if driven by a DIAMETER constraint later)"
+            )
+        cx = _to_meters(spec["center"][0])
+        cy = _to_meters(spec["center"][1])
+        r = _to_meters(spec["radius"])
+        return {
+            "btType": "BTMSketchCurve-4",
+            "entityId": entity_id,
+            "centerId": f"{entity_id}.center",
+            "geometry": {
+                "btType": "BTCurveGeometryCircle-115",
+                "clockwise": False,
+                "radius": r,
+                "xCenter": cx,
+                "yCenter": cy,
+                "xDir": 1.0,
+                "yDir": 0.0,
+            },
+            "isConstruction": construction,
+        }
+    if etype == "arc":
+        if "center" not in spec or "radius" not in spec:
+            raise ValueError(f"arc spec {entity_id!r} needs center + radius seeds")
+        cx = _to_meters(spec["center"][0])
+        cy = _to_meters(spec["center"][1])
+        r = _to_meters(spec["radius"])
+        start_angle = parse_angle(spec.get("start_angle", 0.0)).radians
+        end_angle = parse_angle(spec.get("end_angle", math.pi / 2)).radians
+        return {
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": entity_id,
+            "startPointId": f"{entity_id}.start",
+            "endPointId": f"{entity_id}.end",
+            "startParam": start_angle,
+            "endParam": end_angle,
+            "geometry": {
+                "btType": "BTCurveGeometryCircle-115",
+                "clockwise": False,
+                "radius": r,
+                "xCenter": cx,
+                "yCenter": cy,
+                "xDir": 1.0,
+                "yDir": 0.0,
+            },
+            "centerId": f"{entity_id}.center",
+            "isConstruction": construction,
+        }
+    if etype == "point":
+        at = spec.get("at") or [0.0, 0.0]
+        px, py = _to_meters(at[0]), _to_meters(at[1])
+        return {
+            "btType": "BTMSketchPoint-158",
+            "entityId": entity_id,
+            "x": px,
+            "y": py,
+            "isConstruction": construction,
+        }
+    raise ValueError(
+        f"Unknown entity type {etype!r}. Supported: line, circle, arc, point."
+    )
+
+
 class SketchBuilder:
     """Builder for creating Onshape sketch features in BTMSketch-151 format."""
 
@@ -1040,6 +1158,61 @@ class SketchBuilder:
                 is_construction=is_construction,
             )
 
+        return self
+
+    # -----------------------------------------------------------------
+    # Constraint-first surface (NEW): user-provided entity IDs +
+    # explicit constraints. See sketch_constraints.py for the
+    # serializer and scratchpad/sketch-constraint-payloads.md for the
+    # wire-format probe this is built against.
+    # -----------------------------------------------------------------
+
+    def add_entity_spec(self, spec: Dict[str, Any]) -> "SketchBuilder":
+        """Add a single entity from a user-level spec dict.
+
+        See `serialize_entity_spec()` for supported shapes. This instance
+        method is a stateful convenience; both it and sketch_edit call
+        the pure serializer so new entity types land in both paths.
+        """
+        entity = serialize_entity_spec(spec)
+        entity_id = entity["entityId"]
+        if any(e.get("entityId") == entity_id for e in self.entities):
+            raise ValueError(f"duplicate entity id: {entity_id!r}")
+        self.entities.append(entity)
+        return self
+
+    def add_constraint_spec(self, spec: Dict[str, Any]) -> "SketchBuilder":
+        """Add a constraint from a user-level spec dict.
+
+        Spec shape:
+          {"type": "TANGENT",  "entities": ["line1", "circle1"]}
+          {"type": "DIAMETER", "entity":   "hub", "value": "50 mm"}
+          {"type": "DISTANCE", "entities": ["a.center", "b.center"], "value": "100 mm", "direction": "MINIMUM"}
+          {"type": "OFFSET",   "entities": ["hub_offset", "hub"]}
+
+        See sketch_constraints.py for the full list of supported types.
+        """
+        from .sketch_constraints import serialize, validate_entity_refs
+
+        ctype = spec.get("type")
+        if not ctype:
+            raise ValueError(f"constraint spec missing 'type': {spec}")
+
+        known_ids = {e.get("entityId") for e in self.entities if e.get("entityId")}
+        refs = list(spec.get("entities") or ([spec["entity"]] if spec.get("entity") else []))
+        if known_ids and refs:
+            validate_entity_refs(refs, known_ids)
+
+        self.constraints.append(
+            serialize(
+                ctype,
+                entities=spec.get("entities"),
+                entity=spec.get("entity"),
+                value=spec.get("value"),
+                direction=spec.get("direction"),
+                constraint_id=spec.get("id"),
+            )
+        )
         return self
 
     def build(self, plane_id: Optional[str] = None) -> Dict[str, Any]:

@@ -1105,25 +1105,50 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="create_sketch",
             description=(
-                "Create ONE sketch feature containing many entities at once. "
-                "Use this whenever you need >1 primitive on the same plane/face "
-                "(e.g. plate outline + 4 mounting holes, NEMA bolt patterns, etc.) "
-                "to avoid feature-tree bloat -- 5 holes = 1 feature here vs 5 with "
-                "the per-primitive tools. The per-primitive tools "
-                "(create_sketch_rectangle/circle/line/arc) stay available as fast "
-                "paths for one-shot sketches.\n\n"
-                "Sketch location: pass either `plane` (Front/Top/Right) or `faceId` "
-                "(from `list_entities`). `faceId` wins when both are given.\n\n"
-                "`entities` is an array of mixed primitives. Each item carries a "
-                "`type` discriminator and the type-specific args:\n"
+                "Create ONE sketch feature atomically. Two surfaces in one tool:\n\n"
+                "**Coordinate-first** (legacy, for simple sketches): pass entity "
+                "dicts without `id` and no `constraints`. The builder hand-computes "
+                "positions from your coordinates. Fast for 1–3 primitives where "
+                "you already know where everything goes.\n\n"
+                "**Constraint-first** (for drawing transcription): give each "
+                "entity a user-level `id`, list real-world `constraints` between "
+                "them, and let Onshape's solver resolve positions. This is how "
+                "the UI works and how engineering drawings are specified.\n\n"
+                "Sketch location: pass either `plane` (Front/Top/Right) or "
+                "`faceId` (from `list_entities` or the feature_id of a "
+                "create_offset_plane). `faceId` wins when both are given.\n\n"
+                "### Coordinate-first entity types\n"
                 "  rectangle:         {type, corner1:[x,y], corner2:[x,y], variableWidth?, variableHeight?}\n"
                 "  rounded_rectangle: {type, corner1:[x,y], corner2:[x,y], cornerRadius}\n"
                 "  circle:            {type, center:[x,y], radius, variableRadius?, variableCenter?:[xv,yv]}\n"
                 "  line:              {type, start:[x,y], end:[x,y]}\n"
-                "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
-                "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" for "
-                "explicit units. Arc startAngle/endAngle default to DEGREES — "
-                "pass strings like \"1.5 rad\" when you need radians."
+                "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n\n"
+                "### Constraint-first entity types (require `id`)\n"
+                "  line:   {type:'line',   id, start:[x,y]?, end:[x,y]?, construction?}\n"
+                "  circle: {type:'circle', id, center:[x,y], radius, construction?}\n"
+                "  arc:    {type:'arc',    id, center:[x,y], radius, start_angle?, end_angle?, construction?}\n"
+                "  point:  {type:'point',  id, at:[x,y]?, construction?}\n\n"
+                "Circle / arc SEEDS (center + radius) are required even when "
+                "a DIAMETER or RADIUS constraint will drive the final value — "
+                "Onshape's solver needs a starting guess. Line start/end are "
+                "optional; seed to [0,0] when omitted and let COINCIDENT / "
+                "TANGENT constraints pull endpoints into position.\n\n"
+                "### Constraints (constraint-first surface only)\n"
+                "Each item: {type, entities?:[id,...] | entity?:id, value?, direction?}.\n"
+                "Entity refs are ids, optionally with a sub-point suffix:\n"
+                "  `line.start`, `line.end`, `circle.center`, `arc.center`\n"
+                "Supported types:\n"
+                "  Entity-ref only: HORIZONTAL, VERTICAL (LINES ONLY — not points), "
+                "COINCIDENT, TANGENT, CONCENTRIC, PARALLEL, PERPENDICULAR, EQUAL, MIDPOINT\n"
+                "  Dimensioned: DIAMETER, RADIUS, DISTANCE (add `direction: HORIZONTAL|VERTICAL|MINIMUM`), "
+                "ANGLE (value in degrees by default — string \"90 deg\" / \"1.57 rad\" for explicit units)\n"
+                "  Binary pair: OFFSET (offset entity + master — pair it with a DISTANCE "
+                "constraint on the same two for the offset length)\n"
+                "Aliases: HORIZONTAL_DISTANCE → DISTANCE(direction=HORIZONTAL), "
+                "VERTICAL_DISTANCE → DISTANCE(direction=VERTICAL).\n"
+                "POINT_ON is NOT a separate type — use COINCIDENT with a point sub-ref.\n\n"
+                "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" "
+                "for explicit units."
             ),
             inputSchema={
                 "type": "object",
@@ -1144,13 +1169,42 @@ async def list_tools() -> list[Tool]:
                     "entities": {
                         "type": "array",
                         "minItems": 1,
-                        "description": "Mixed list of sketch primitives keyed by `type`.",
+                        "description": "Mixed list of sketch primitives. Presence of `id` on an entity switches to the constraint-first surface (single-entity circles / arcs / lines + solver-driven positions). See tool description for per-type fields.",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "enum": ["rectangle", "rounded_rectangle", "circle", "line", "arc"],
+                                    "enum": [
+                                        "rectangle",
+                                        "rounded_rectangle",
+                                        "circle",
+                                        "line",
+                                        "arc",
+                                        "point",
+                                    ],
+                                },
+                                "id": {"type": "string"},
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                    "constraints": {
+                        "type": "array",
+                        "description": "Constraint-first sketch solver directives. Each item: {type, entities?:[id,...] | entity?:id, value?, direction?}. See tool description for supported types + entity-ref syntax.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "entities": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "entity": {"type": "string"},
+                                "value": {"type": ["string", "number"]},
+                                "direction": {
+                                    "type": "string",
+                                    "enum": ["MINIMUM", "HORIZONTAL", "VERTICAL"],
                                 },
                             },
                             "required": ["type"],
@@ -3768,6 +3822,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             for i, ent in enumerate(entities):
                 if not isinstance(ent, dict):
                     raise ValueError(f"entities[{i}] must be an object, got {type(ent).__name__}")
+                # Constraint-first path: if the entity carries an `id`, it's
+                # the new spec shape and goes through the constraint-aware
+                # serializer (single-entity circles/arcs, user-supplied ids).
+                if ent.get("id"):
+                    sketch.add_entity_spec(ent)
+                    continue
                 etype = (ent.get("type") or "").lower()
                 if etype == "rectangle":
                     sketch.add_rectangle(
@@ -3820,6 +3880,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                         f"entities[{i}].type must be rectangle | rounded_rectangle | circle | line | arc, "
                         f"got {ent.get('type')!r}"
                     )
+
+            # Top-level constraints array — constraint-first surface.
+            for i, cspec in enumerate(arguments.get("constraints") or []):
+                if not isinstance(cspec, dict):
+                    raise ValueError(
+                        f"constraints[{i}] must be an object, got {type(cspec).__name__}"
+                    )
+                sketch.add_constraint_spec(cspec)
 
             result = await apply_feature_and_check(
                 client,
