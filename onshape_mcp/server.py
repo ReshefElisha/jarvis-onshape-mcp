@@ -23,7 +23,7 @@ from .api.partstudio import PartStudioManager
 from .api.variables import VariableManager
 from .api.documents import DocumentManager
 from .builders.sketch import SketchBuilder, SketchPlane
-from .builders.extrude import ExtrudeBuilder, ExtrudeType
+from .builders.extrude import ExtrudeBuilder, ExtrudeEndType, ExtrudeType
 from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
 from .api.featurescript import FeatureScriptManager
@@ -172,9 +172,22 @@ async def list_tools() -> list[Tool]:
                             "CRITICAL for REMOVE on a sketched face: without this, the cut "
                             "goes away from the material (into air) and silently removes "
                             "nothing (Onshape returns featureStatus=INFO). Default false; "
-                            "set true for 'cut into existing body from a +Z face' patterns."
+                            "set true for 'cut into existing body from a +Z face' patterns. "
+                            "Ignored when endType is SYMMETRIC."
                         ),
                         "default": False,
+                    },
+                    "endType": {
+                        "type": "string",
+                        "enum": ["BLIND", "SYMMETRIC"],
+                        "description": (
+                            "End condition. BLIND: extrude one direction, `depth` is the "
+                            "length. SYMMETRIC: extrude both sides of the sketch plane, "
+                            "`depth` is the TOTAL length (depth/2 each side). Use SYMMETRIC "
+                            "to avoid building two mirrored BLIND extrudes for features that "
+                            "should straddle their sketch plane."
+                        ),
+                        "default": "BLIND",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId", "depth"],
@@ -1825,7 +1838,26 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_extrude":
         try:
-            op_type = ExtrudeType[arguments.get("operationType", "NEW")]
+            raw_op = arguments.get("operationType", "NEW")
+            try:
+                op_type = ExtrudeType[raw_op]
+            except KeyError:
+                return [TextContent(type="text", text=_exception_json(
+                    ValueError(
+                        f"Invalid operationType {raw_op!r}; must be NEW | ADD | REMOVE | INTERSECT"
+                    ),
+                    tool_name=name,
+                ))]
+            raw_end = arguments.get("endType", "BLIND")
+            try:
+                end_type = ExtrudeEndType[raw_end]
+            except KeyError:
+                return [TextContent(type="text", text=_exception_json(
+                    ValueError(
+                        f"Invalid endType {raw_end!r}; must be BLIND | SYMMETRIC"
+                    ),
+                    tool_name=name,
+                ))]
             # Smart default: if this is a REMOVE extrude on a face (faceId context
             # unknown here, but REMOVE + default direction cuts AWAY from the
             # sketch, which is almost never what the user wants on a top-facing
@@ -1836,6 +1868,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 sketch_feature_id=arguments["sketchFeatureId"],
                 operation_type=op_type,
                 opposite_direction=opp,
+                end_type=end_type,
             )
             extrude.set_depth(arguments["depth"], variable_name=arguments.get("variableDepth"))
 
@@ -1847,11 +1880,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 extrude.build(),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
-        except KeyError:
-            return [TextContent(type="text", text=_exception_json(
-                ValueError("Invalid operationType; must be NEW | ADD | REMOVE | INTERSECT"),
-                tool_name=name,
-            ))]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating extrude: {e.response.status_code} - {e.response.text[:500]}")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]

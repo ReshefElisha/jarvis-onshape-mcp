@@ -2,7 +2,7 @@
 
 import pytest
 
-from onshape_mcp.builders.extrude import ExtrudeBuilder, ExtrudeType
+from onshape_mcp.builders.extrude import ExtrudeBuilder, ExtrudeEndType, ExtrudeType
 
 
 class TestExtrudeType:
@@ -207,6 +207,51 @@ class TestExtrudeBuilder:
         assert opposite_param["btType"] == "BTMParameterBoolean-144"
         assert opposite_param["value"] is False
 
+    def test_end_type_defaults_to_blind(self):
+        """symmetric boolean present and False by default for back-compat.
+
+        Onshape's public extrude feature rejects an `endBound` enum; it uses a
+        simple `symmetric: true/false` boolean. The builder translates our
+        ExtrudeEndType enum into that boolean so callers get a clean API.
+        """
+        extrude = ExtrudeBuilder(sketch_feature_id="sketch1")
+        result = extrude.build()
+        sym_param = next(
+            p for p in result["feature"]["parameters"]
+            if p["parameterId"] == "symmetric"
+        )
+        assert sym_param["btType"] == "BTMParameterBoolean-144"
+        assert sym_param["value"] is False
+
+    def test_end_type_symmetric_emits_boolean(self):
+        """Passing SYMMETRIC end-type flips the symmetric boolean to True."""
+        extrude = ExtrudeBuilder(
+            sketch_feature_id="sketch1", end_type=ExtrudeEndType.SYMMETRIC
+        )
+        result = extrude.build()
+        sym_param = next(
+            p for p in result["feature"]["parameters"]
+            if p["parameterId"] == "symmetric"
+        )
+        assert sym_param["value"] is True
+
+    def test_symmetric_keeps_opposite_direction_field_but_onshape_ignores_it(self):
+        """The builder passes oppositeDirection through untouched; Onshape
+        ignores it under SYMMETRIC. We don't silently flip it because the
+        feature payload shape stays stable — makes testing easier and avoids
+        spooky action-at-a-distance for readers of the output."""
+        extrude = ExtrudeBuilder(
+            sketch_feature_id="sketch1",
+            end_type=ExtrudeEndType.SYMMETRIC,
+            opposite_direction=True,
+        )
+        result = extrude.build()
+        opp = next(
+            p for p in result["feature"]["parameters"]
+            if p["parameterId"] == "oppositeDirection"
+        )
+        assert opp["value"] is True
+
     def test_build_all_operation_types(self):
         """Test build() with all operation types."""
         operation_types = [
@@ -241,7 +286,8 @@ class TestExtrudeBuilder:
         assert result["feature"]["name"] == "CompleteExtrude"
 
         parameters = result["feature"]["parameters"]
-        assert len(parameters) == 4  # entities, operationType, depth, oppositeDirection
+        # entities, operationType, endBound, depth, oppositeDirection
+        assert len(parameters) == 5
 
     def test_zero_depth(self):
         """Test handling zero depth."""
