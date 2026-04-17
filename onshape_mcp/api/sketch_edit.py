@@ -154,10 +154,13 @@ def _merge(
         wire_entity_id(c) for c in existing_constraints if wire_entity_id(c)
     }
 
-    # Validate addEntities don't collide.
+    # Validate addEntities don't collide. wire_entity_id accepts both
+    # pre-serialization `id` and post-serialization `entityId` — the
+    # orchestrator may serialize before calling _merge, so we must accept
+    # either shape here.
     add_entity_ids: List[str] = []
     for i, e in enumerate(add_entities):
-        eid = e.get("id") if isinstance(e, dict) else None
+        eid = wire_entity_id(e)
         if not isinstance(eid, str) or not eid:
             raise ValueError(
                 f"addEntities[{i}] must carry a non-empty `id` string; got {e!r}"
@@ -172,11 +175,13 @@ def _merge(
 
     add_constraint_ids: List[str] = []
     for i, c in enumerate(add_constraints):
-        cid = c.get("id") if isinstance(c, dict) else None
+        cid = wire_entity_id(c)
         if not isinstance(cid, str) or not cid:
-            raise ValueError(
-                f"addConstraints[{i}] must carry a non-empty `id` string; got {c!r}"
-            )
+            # Constraints without an explicit id still merge fine — they
+            # just can't be targeted by a later removeIds. Skip the
+            # validation rather than raising, since one-shot constraints
+            # are a legitimate pattern.
+            continue
         if cid in existing_constraint_ids or cid in add_constraint_ids:
             raise ValueError(
                 f"addConstraints[{i}].id={cid!r} collides with an existing or "
@@ -305,6 +310,40 @@ async def edit_sketch(
     existing_entities = list(target.get("entities") or [])
     existing_constraints = list(target.get("constraints") or [])
 
+    # Serialize user-facing specs into BTMSketch-151 wire shape BEFORE the
+    # merge. Preserves the user's `id` as the wire-level entityId so the
+    # cascade / remove-by-id logic in _merge resolves cleanly.
+    from ..builders.sketch import serialize_entity_spec
+    from ..builders.sketch_constraints import serialize as serialize_constraint
+
+    serialized_add_entities: List[Dict[str, Any]] = []
+    for i, spec in enumerate(add_entities):
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"addEntities[{i}] must be an object, got {type(spec).__name__}"
+            )
+        serialized_add_entities.append(serialize_entity_spec(spec))
+
+    serialized_add_constraints: List[Dict[str, Any]] = []
+    for i, spec in enumerate(add_constraints):
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"addConstraints[{i}] must be an object, got {type(spec).__name__}"
+            )
+        ctype = spec.get("type")
+        if not ctype:
+            raise ValueError(f"addConstraints[{i}] missing 'type': {spec!r}")
+        serialized_add_constraints.append(
+            serialize_constraint(
+                ctype,
+                entities=spec.get("entities"),
+                entity=spec.get("entity"),
+                value=spec.get("value"),
+                direction=spec.get("direction"),
+                constraint_id=spec.get("id"),
+            )
+        )
+
     (
         merged_entities,
         merged_constraints,
@@ -313,8 +352,8 @@ async def edit_sketch(
     ) = _merge(
         existing_entities,
         existing_constraints,
-        add_entities,
-        add_constraints,
+        serialized_add_entities,
+        serialized_add_constraints,
         remove_ids,
     )
 
