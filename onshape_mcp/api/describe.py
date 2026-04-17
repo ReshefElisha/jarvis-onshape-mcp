@@ -108,6 +108,177 @@ def _bbox_text(bbox: Optional[Dict[str, Any]]) -> str:
     )
 
 
+def _physical_summary_text(
+    entities_out: Dict[str, Any],
+    bbox: Optional[Dict[str, Any]],
+    mass: Dict[str, Any],
+    face_areas: Optional[Dict[str, float]],
+) -> str:
+    """Render the PHYSICAL SUMMARY section.
+
+    Pulls from already-collected data plus an FS face-area map when available.
+    Emits raw data; no alerts. The "suspect" block lists entities below small
+    thresholds so downstream predicates (or a human eye) can decide whether
+    they matter. 0.1 mm^2 / 0.05 mm are typical sliver thresholds that
+    indicate a regen glitch (Onshape's tolerance on a clean rect is ~0).
+    """
+    bodies = entities_out.get("bodies") or []
+
+    face_type_counts: Dict[str, int] = {}
+    edge_type_counts: Dict[str, int] = {}
+    edge_lengths: List[float] = []
+    all_face_ids: List[str] = []
+    all_edges: List[Dict[str, Any]] = []
+
+    for b in bodies:
+        for f in b.get("faces") or []:
+            t = f.get("type") or "?"
+            face_type_counts[t] = face_type_counts.get(t, 0) + 1
+            fid = f.get("id")
+            if fid:
+                all_face_ids.append(fid)
+        for e in b.get("edges") or []:
+            t = e.get("type") or "?"
+            edge_type_counts[t] = edge_type_counts.get(t, 0) + 1
+            L = e.get("length")
+            if isinstance(L, (int, float)) and L > 0:
+                edge_lengths.append(L)
+            all_edges.append(e)
+
+    total_faces = sum(face_type_counts.values())
+    total_edges = sum(edge_type_counts.values())
+
+    # Face area range (mm^2) -- best-effort from FS.
+    face_area_line = "face areas: (FS probe unavailable)"
+    suspect_faces: List[Dict[str, Any]] = []
+    if face_areas:
+        areas = [(fid, a) for fid, a in face_areas.items() if isinstance(a, (int, float))]
+        if areas:
+            min_fid, min_a = min(areas, key=lambda x: x[1])
+            max_fid, max_a = max(areas, key=lambda x: x[1])
+            face_area_line = (
+                f"face areas: min={min_a*1e6:.3f} mm^2 ({min_fid})  "
+                f"max={max_a*1e6:.3f} mm^2 ({max_fid})"
+            )
+            # Suspect threshold: 0.1 mm^2 = 1e-7 m^2. Slivers + degenerate
+            # faces land here after a botched cut.
+            for fid, a in areas:
+                if a < 1e-7:
+                    suspect_faces.append(
+                        {"id": fid, "reason": "tiny face area",
+                         "value_mm2": round(a * 1e6, 4), "threshold_mm2": 0.1}
+                    )
+
+    # Edge length range.
+    if edge_lengths:
+        min_L = min(edge_lengths)
+        max_L = max(edge_lengths)
+        edge_len_line = (
+            f"edge lengths: min={min_L*1000:.3f} mm  max={max_L*1000:.3f} mm"
+        )
+    else:
+        edge_len_line = "edge lengths: no measurable edges"
+
+    suspect_edges: List[Dict[str, Any]] = []
+    for e in all_edges:
+        L = e.get("length")
+        eid = e.get("id")
+        if isinstance(L, (int, float)) and 0 < L < 5e-5 and eid:
+            suspect_edges.append(
+                {"id": eid, "reason": "tiny edge length",
+                 "value_mm": round(L * 1000, 4), "threshold_mm": 0.05}
+            )
+
+    # Aggregate volume from mass properties.
+    total_vol_mm3: Optional[float] = None
+    if mass:
+        mp_bodies = mass.get("bodies") or {}
+        try:
+            total_vol_mm3 = sum(
+                (bd.get("volume") or [0, 0, 0])[1] * 1e9
+                for bd in mp_bodies.values()
+            )
+        except Exception:
+            total_vol_mm3 = None
+
+    # BBox summary.
+    if bbox and "minCorner" in bbox:
+        mn, mx = bbox["minCorner"], bbox["maxCorner"]
+        bbox_line = (
+            f"bbox: "
+            f"{(mx['x']-mn['x'])*1000:.2f} x "
+            f"{(mx['y']-mn['y'])*1000:.2f} x "
+            f"{(mx['z']-mn['z'])*1000:.2f} mm"
+        )
+    else:
+        bbox_line = "bbox: unknown"
+
+    lines = ["PHYSICAL SUMMARY:"]
+    lines.append(
+        f"  bodies: {len(bodies)}   "
+        f"volume: {f'{total_vol_mm3:.1f} mm^3' if total_vol_mm3 is not None else 'unknown'}   "
+        f"{bbox_line}"
+    )
+    face_breakdown = (
+        ", ".join(f"{n} {t.lower()}" for t, n in sorted(face_type_counts.items()))
+        or "none"
+    )
+    edge_breakdown = (
+        ", ".join(f"{n} {t.lower()}" for t, n in sorted(edge_type_counts.items()))
+        or "none"
+    )
+    lines.append(f"  faces: {total_faces} ({face_breakdown})")
+    lines.append(f"  edges: {total_edges} ({edge_breakdown})")
+    lines.append(f"  {face_area_line}")
+    lines.append(f"  {edge_len_line}")
+    if suspect_faces or suspect_edges:
+        lines.append("  suspect geometry (data only, not alerts):")
+        for s in suspect_faces:
+            lines.append(f"    face {s['id']}: {s['reason']} = {s['value_mm2']} mm^2 (< {s['threshold_mm2']})")
+        for s in suspect_edges:
+            lines.append(f"    edge {s['id']}: {s['reason']} = {s['value_mm']} mm (< {s['threshold_mm']})")
+    else:
+        lines.append("  suspect geometry: none")
+    return "\n".join(lines)
+
+
+_FACE_AREAS_FS = """
+function(context is Context, queries) {
+    var out = {};
+    var faces = evaluateQuery(context, qOwnedByBody(qAllNonMeshSolidBodies(), EntityType.FACE));
+    for (var f in faces) {
+        try {
+            out[transientQueriesToStrings(f)] = evArea(context, {"entities": f});
+        } catch (e) {
+            // Degenerate faces can fail evArea; skip them so one bad face
+            // doesn't tank the whole summary.
+        }
+    }
+    return out;
+}
+""".strip()
+
+
+def _parse_fs_area_map(fs_response: Dict[str, Any]) -> Dict[str, float]:
+    """Pull face_id -> area-in-m^2 from an FSValueMap response."""
+    out: Dict[str, float] = {}
+    result = fs_response.get("result") or {}
+    entries = result.get("value") if isinstance(result.get("value"), list) else []
+    for ent in entries:
+        if not isinstance(ent, dict):
+            continue
+        key = (ent.get("key") or {}).get("value")
+        if not isinstance(key, str):
+            continue
+        val = ent.get("value") or {}
+        # evArea returns a ValueWithUnits: {btType: "...ValueWithUnits",
+        # value: <number>, unitToPower: {METER: 2}}
+        payload = val.get("value") if isinstance(val, dict) else None
+        if isinstance(payload, (int, float)):
+            out[key] = float(payload)
+    return out
+
+
 def _mass_props_text(mp: Dict[str, Any]) -> str:
     bodies = mp.get("bodies") or {}
     if not bodies:
@@ -192,9 +363,16 @@ class DescribeManager:
                 views=views, width=render_width, height=render_height,
             )
         )
+        # Face-area probe rides alongside the other independent reads; FS eval
+        # is cheap (~50ms) and gives us min/max face area for the physical
+        # summary. Best-effort: failure produces an empty map and the section
+        # reports "(FS probe unavailable)".
+        face_areas_task = asyncio.create_task(
+            self._fetch_face_areas(document_id, workspace_id, element_id)
+        )
 
-        features_raw, entities_out, bbox_raw, mass_raw, rendered = await asyncio.gather(
-            features_task, entities_task, bbox_task, mass_task, render_task,
+        features_raw, entities_out, bbox_raw, mass_raw, rendered, face_areas = await asyncio.gather(
+            features_task, entities_task, bbox_task, mass_task, render_task, face_areas_task,
             return_exceptions=True,
         )
 
@@ -209,6 +387,7 @@ class DescribeManager:
         bbox_raw = _safe(bbox_raw, "bbox") or {}
         mass_raw = _safe(mass_raw, "mass_properties") or {}
         rendered = _safe(rendered, "render") or []
+        face_areas = _safe(face_areas, "face_areas") or {}
 
         # Pull bbox out of the FS evBox3d response; it's nested under "result".
         bbox = None
@@ -226,6 +405,7 @@ class DescribeManager:
         sections = [
             _feature_tree_text(features_raw),
             _body_topology_text(entities_out),
+            _physical_summary_text(entities_out, bbox, mass_raw, face_areas),
             _bbox_text(bbox),
             _mass_props_text(mass_raw),
             "VIEWS RENDERED:",
@@ -241,6 +421,7 @@ class DescribeManager:
                 "entities": entities_out,
                 "bbox": bbox,
                 "mass_properties": mass_raw,
+                "face_areas": face_areas,
             },
         )
 
@@ -250,6 +431,19 @@ class DescribeManager:
         except Exception as e:
             logger.warning(f"mass_properties failed (likely empty PS): {e}")
             return {}
+
+    async def _fetch_face_areas(self, did: str, wid: str, eid: str) -> Dict[str, float]:
+        """Run `evArea` over every solid-body face and return face_id -> m^2.
+
+        Best-effort: any failure returns an empty dict so the caller falls
+        through to the "(FS probe unavailable)" text. Never raises.
+        """
+        try:
+            resp = await self.featurescript.evaluate(did, wid, eid, _FACE_AREAS_FS)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"face-area FS probe failed: {e}")
+            return {}
+        return _parse_fs_area_map(resp)
 
 
 def _extract_fs_vector(fs_val: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
