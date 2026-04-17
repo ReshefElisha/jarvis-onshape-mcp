@@ -6,10 +6,12 @@ silently regress without mocking a full bodydetails response.
 """
 
 from onshape_mcp.api.entities import (
+    _classify_face,
     _face_passes_filters,
     _edge_passes_filters,
     _vertex_passes_filters,
     _in_range,
+    _parse_fs_frame_map,
 )
 
 
@@ -209,6 +211,176 @@ class TestEdgeFilters:
             e, geometry_type=None, at_z_mm=None, at_z_tol_mm=0.5,
             radius_range_mm=[2.0, 5.0], length_range_mm=None,
         )
+
+
+class TestFaceFrames:
+    """Verify sketch-axis + outward-normal surfacing from the FS probe."""
+
+    @staticmethod
+    def _planar_face(face_id="JHW"):
+        """A minimal BTExportModelFace payload for a planar face."""
+        return {
+            "id": face_id,
+            "surface": {
+                "type": "plane",
+                "origin": {"x": 0.0, "y": 0.0, "z": 0.006},
+                "normal": {"x": 0.0, "y": 0.0, "z": 1.0},
+            },
+        }
+
+    def test_parse_fs_frame_map_unpacks_flat_9_array(self):
+        """FS returns each face's frame as a 9-element flat array."""
+        # Construct the response shape Onshape actually produces: list of
+        # entries with key+value, each value a BTFSValueArray wrapping 9
+        # numeric BTFSValueWithUnits entries.
+        fs_resp = {
+            "result": {
+                "value": [
+                    {
+                        "key": {"value": "JHW"},
+                        "value": {
+                            "value": [
+                                # normal = (0, 0, 1)
+                                {"value": 0.0}, {"value": 0.0}, {"value": 1.0},
+                                # x = (1, 0, 0)
+                                {"value": 1.0}, {"value": 0.0}, {"value": 0.0},
+                                # y = (0, 1, 0)
+                                {"value": 0.0}, {"value": 1.0}, {"value": 0.0},
+                            ]
+                        },
+                    }
+                ],
+            }
+        }
+        frames = _parse_fs_frame_map(fs_resp)
+        assert list(frames.keys()) == ["JHW"]
+        assert frames["JHW"]["normal"] == [0.0, 0.0, 1.0]
+        assert frames["JHW"]["x"] == [1.0, 0.0, 0.0]
+        assert frames["JHW"]["y"] == [0.0, 1.0, 0.0]
+
+    def test_parse_fs_frame_map_skips_malformed_entries(self):
+        """A bad face (wrong array length) shouldn't block the rest."""
+        fs_resp = {
+            "result": {
+                "value": [
+                    # good
+                    {
+                        "key": {"value": "JA"},
+                        "value": {
+                            "value": [{"value": float(i)} for i in range(9)]
+                        },
+                    },
+                    # bad: only 6 comps instead of 9
+                    {
+                        "key": {"value": "JB"},
+                        "value": {
+                            "value": [{"value": 0.0}] * 6
+                        },
+                    },
+                ],
+            }
+        }
+        frames = _parse_fs_frame_map(fs_resp)
+        assert "JA" in frames and "JB" not in frames
+
+    def test_classify_face_surfaces_sketch_axes_on_planar(self):
+        """A +Z outward face with world-aligned U/V writes sketch-x/sketch-y labels."""
+        face = self._planar_face()
+        frames = {
+            "JHW": {
+                "normal": [0.0, 0.0, 1.0],   # +Z outward
+                "x": [1.0, 0.0, 0.0],        # U = world +X
+                "y": [0.0, 1.0, 0.0],        # V = world +Y
+            }
+        }
+        classified = _classify_face(face, face_frames=frames)
+        assert classified["outward_axis"] == "+Z"
+        assert classified["sketch_x_axis"] == "+X"
+        assert classified["sketch_y_axis"] == "+Y"
+        assert classified["sketch_x_world"] == [1.0, 0.0, 0.0]
+        assert classified["sketch_y_world"] == [0.0, 1.0, 0.0]
+        # Description carries the sketch-axis hint so Claude can read it.
+        assert "sketch-x=+X" in classified["description"]
+        assert "sketch-y=+Y" in classified["description"]
+
+    def test_classify_face_vertical_side_face_sketch_axes(self):
+        """A face facing world +Y has sketch-x=+X, sketch-y=+Z (typical)."""
+        face = {
+            "id": "JY1",
+            "surface": {
+                "type": "plane",
+                "origin": {"x": 0.010, "y": 0.030, "z": 0.003},
+                "normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+            },
+        }
+        frames = {
+            "JY1": {
+                "normal": [0.0, 1.0, 0.0],
+                "x": [1.0, 0.0, 0.0],
+                "y": [0.0, 0.0, 1.0],
+            }
+        }
+        classified = _classify_face(face, face_frames=frames)
+        assert classified["outward_axis"] == "+Y"
+        assert classified["sketch_x_axis"] == "+X"
+        assert classified["sketch_y_axis"] == "+Z"
+        assert "sketch-x=+X sketch-y=+Z" in classified["description"]
+
+    def test_classify_face_without_frames_leaves_sketch_axes_none(self):
+        """Missing FS frames -> no lying about sketch-axis direction."""
+        classified = _classify_face(self._planar_face(), face_frames=None)
+        assert classified["sketch_x_axis"] is None
+        assert classified["sketch_y_axis"] is None
+        assert classified["sketch_x_world"] is None
+        assert classified["sketch_y_world"] is None
+
+    def test_classify_cylinder_face_has_no_sketch_axes(self):
+        """Non-planar faces never get sketch_x/y surfaced even if FS reports them."""
+        cyl = {
+            "id": "JCYL",
+            "surface": {
+                "type": "cylinder",
+                "origin": {"x": 0.020, "y": 0.015, "z": 0.006},
+                "axis": {"x": 0.0, "y": 0.0, "z": 1.0},
+                "radius": 0.005,
+            },
+        }
+        # FS might still return a frame for a cylinder (tangent-plane at
+        # parameter (0.5, 0.5)); we suppress it since the notion doesn't
+        # make sense for a curved face.
+        frames = {
+            "JCYL": {
+                "normal": [1.0, 0.0, 0.0],
+                "x": [0.0, 1.0, 0.0],
+                "y": [0.0, 0.0, 1.0],
+            }
+        }
+        classified = _classify_face(cyl, face_frames=frames)
+        assert classified["sketch_x_world"] is None
+        assert classified["sketch_y_world"] is None
+        # But outward_normal still bubbles up.
+        assert classified["outward_normal"] == [1.0, 0.0, 0.0]
+
+    def test_classify_face_off_axis_sketch_frame_not_labeled(self):
+        """If sketch x/y land 45° off an axis, the label is None — don't fake it."""
+        face = self._planar_face()
+        # A plane tilted 30° about Z: its U/V are 30° from world X/Y.
+        import math
+        c, s = math.cos(math.radians(30)), math.sin(math.radians(30))
+        frames = {
+            "JHW": {
+                "normal": [0.0, 0.0, 1.0],
+                "x": [c, s, 0.0],     # 30° off +X
+                "y": [-s, c, 0.0],    # 30° off +Y
+            }
+        }
+        classified = _classify_face(face, face_frames=frames)
+        assert classified["sketch_x_axis"] is None
+        assert classified["sketch_y_axis"] is None
+        # Raw vectors are still carried so a caller doing vector math gets them.
+        assert classified["sketch_x_world"] == [c, s, 0.0]
+        # Description doesn't include a sketch-x line (can't label cleanly).
+        assert "sketch-x=" not in classified["description"]
 
 
 class TestVertexFilters:
