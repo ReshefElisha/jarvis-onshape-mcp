@@ -48,6 +48,8 @@ from .api.rendering import (
 from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
 from .builders.chamfer import ChamferBuilder, ChamferType
+from .builders.shell import ShellBuilder
+from .builders.offset_plane import OffsetPlaneBuilder
 from .builders.revolve import RevolveBuilder, RevolveType
 from .builders.pattern import LinearPatternBuilder, CircularPatternBuilder
 from .builders.boolean import BooleanBuilder, BooleanType
@@ -603,7 +605,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="create_document",
-            description="Create a new Onshape document",
+            description=(
+                "Create a new Onshape document. Returns the documentId AND the main workspaceId "
+                "AND the default Part Studio elementId in one shot — no need to follow up with "
+                "get_document_summary + find_part_studios before you start building."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1120,6 +1126,84 @@ async def list_tools() -> list[Tool]:
                     "variableDistance": {"type": "string", "description": "Optional variable name for distance"},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "distance", "edgeIds"],
+            },
+        ),
+        Tool(
+            name="create_shell",
+            description=(
+                "Hollow out a solid body into a thin-walled shell. Pass the face IDs "
+                "(from `list_entities`) you want REMOVED; the remaining faces become the "
+                "shell wall. Inward by default — the outer bounding box is preserved and "
+                "material is eaten inside. Returns the standard {ok, status, feature_id, "
+                "changes?} contract."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Shell name", "default": "Shell"},
+                    "thickness": {
+                        "type": ["number", "string"],
+                        "description": "Wall thickness. Bare numbers are mm; use \"1.5 mm\" / \"0.0625 in\" for explicit units.",
+                    },
+                    "faceIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": "Deterministic IDs of faces to REMOVE. Everything else keeps the shell wall.",
+                    },
+                    "outward": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, offset the shell OUTSIDE the original surface (grows bbox). Default false (inward, preserves bbox) — the common enclosure case.",
+                    },
+                    "variableThickness": {"type": "string", "description": "Optional variable name for thickness"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "thickness", "faceIds"],
+            },
+        ),
+        Tool(
+            name="create_offset_plane",
+            description=(
+                "Create an offset construction plane: a datum plane parallel to a "
+                "reference plane or face, shifted by a signed distance. Use when you "
+                "need to sketch at a specific Z (e.g. 2.5 mm above the Top plane) "
+                "without an existing face there. Pass a `plane` (Front/Top/Right) to "
+                "offset from a standard datum, OR a `referenceFaceId` (from "
+                "`list_entities`) to offset from a face. The new plane becomes a "
+                "sketch target — pass its `feature_id` as the `faceId` arg to any "
+                "sketch primitive."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Plane name", "default": "Offset Plane"},
+                    "offset": {
+                        "type": ["number", "string"],
+                        "description": "Signed offset. Bare numbers are mm; use \"2.5 mm\" / \"0.1 in\" for explicit units. Positive follows the reference outward normal; negate or set `flip` to invert.",
+                    },
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Standard datum plane to offset from. Mutually exclusive with `referenceFaceId`.",
+                    },
+                    "referenceFaceId": {
+                        "type": "string",
+                        "description": "Deterministic face ID to offset from (from `list_entities`). Mutually exclusive with `plane`.",
+                    },
+                    "flip": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Invert the offset direction.",
+                    },
+                    "variableOffset": {"type": "string", "description": "Optional variable name for offset"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "offset"],
             },
         ),
         Tool(
@@ -3091,14 +3175,35 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 is_public=arguments.get("isPublic", False),
             )
 
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created document '{doc.name}'\n"
-                    f"Document ID: {doc.id}\n"
-                    f"Use this ID with other commands to work with this document.",
+            workspace_id: Optional[str] = None
+            part_studio_id: Optional[str] = None
+            part_studio_name: Optional[str] = None
+            try:
+                workspaces = await document_manager.get_workspaces(doc.id)
+                main_ws = next((w for w in workspaces if w.isMain), None) or (
+                    workspaces[0] if workspaces else None
                 )
-            ]
+                if main_ws:
+                    workspace_id = main_ws.id
+                    studios = await document_manager.find_part_studios(doc.id, main_ws.id)
+                    if studios:
+                        part_studio_id = studios[0].id
+                        part_studio_name = studios[0].name
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "create_document: post-create workspace/elementId resolution failed"
+                )
+
+            payload: Dict[str, Any] = {
+                "ok": True,
+                "document_id": doc.id,
+                "document_name": doc.name,
+                "workspace_id": workspace_id,
+                "part_studio_id": part_studio_id,
+                "part_studio_name": part_studio_name,
+                "tool": "create_document",
+            }
+            return [TextContent(type="text", text=json.dumps(payload))]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating document: {e.response.status_code}")
             return [
@@ -3629,6 +3734,71 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating chamfer")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "create_shell":
+        try:
+            shell = ShellBuilder(
+                name=arguments.get("name", "Shell"),
+                thickness=arguments["thickness"],
+                outward=bool(arguments.get("outward", False)),
+            )
+            for face_id in arguments["faceIds"]:
+                shell.add_face(face_id)
+            if arguments.get("variableThickness"):
+                shell.set_thickness(
+                    arguments["thickness"], variable_name=arguments["variableThickness"]
+                )
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                shell.build(),
+                track_changes=bool(arguments.get("trackChanges", True)),
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error creating shell")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "create_offset_plane":
+        try:
+            plane_name = arguments.get("plane")
+            face_id = arguments.get("referenceFaceId")
+            if bool(plane_name) == bool(face_id):
+                return [TextContent(type="text", text=_exception_json(
+                    ValueError("Pass exactly one of `plane` or `referenceFaceId`"),
+                    tool_name=name,
+                ))]
+            if plane_name:
+                reference_id = await partstudio_manager.get_plane_id(
+                    arguments["documentId"], arguments["workspaceId"],
+                    arguments["elementId"], plane_name,
+                )
+            else:
+                reference_id = face_id
+            builder = OffsetPlaneBuilder(
+                name=arguments.get("name", "Offset Plane"),
+                reference_id=reference_id,
+                offset=arguments["offset"],
+                flip=bool(arguments.get("flip", False)),
+            )
+            if arguments.get("variableOffset"):
+                builder.set_offset(
+                    arguments["offset"], variable_name=arguments["variableOffset"]
+                )
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                builder.build(),
+                track_changes=False,  # construction planes don't change bodies
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error creating offset plane")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_revolve":
