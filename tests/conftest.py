@@ -65,8 +65,15 @@ def sample_feature_response():
 
 @pytest.fixture
 def sample_variables():
-    """Provide sample variable data."""
+    """Provide sample variable data in the actual Onshape /variables response shape:
+    a list of one wrapper containing the variable rows. Earlier fixture was a
+    flat list, which masked the get_variables flatten bug."""
     return [
-        {"name": "width", "expression": "10 in", "description": "Width of the part"},
-        {"name": "height", "expression": "5 in", "description": "Height of the part"},
+        {
+            "variableStudioReference": None,
+            "variables": [
+                {"name": "width", "expression": "10 in", "description": "Width of the part"},
+                {"name": "height", "expression": "5 in", "description": "Height of the part"},
+            ],
+        }
     ]
