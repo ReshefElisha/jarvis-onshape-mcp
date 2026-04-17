@@ -11,10 +11,14 @@
   "keywords": ["onshape", "cad", "mcp", "claude", "featurescript", "parametric", "3d", "stl", "step"],
   "userConfig": {
     "ONSHAPE_API_KEY": {
+      "type": "string",
+      "title": "Onshape API Key",
       "description": "Onshape API access key. Get one at https://dev-portal.onshape.com/ (the 'Access Key' value when you create an API key pair).",
       "sensitive": true
     },
     "ONSHAPE_API_SECRET": {
+      "type": "string",
+      "title": "Onshape API Secret",
       "description": "Onshape API secret key (the 'Secret Key' shown once when you create the API key pair).",
       "sensitive": true
     }
