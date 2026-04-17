@@ -4,7 +4,7 @@ import math
 from typing import Any, Dict, List, Tuple, Optional, Union
 from enum import Enum
 
-from ._units import parse_length
+from ._units import parse_angle, parse_length
 
 
 # A sketch-space length: raw number (interpreted as mm, the new default), or a
@@ -12,10 +12,19 @@ from ._units import parse_length
 # coordinates and radii accept this type.
 LengthLike = Union[float, int, str]
 
+# A sketch-space angle: raw number (interpreted as DEGREES, CAD convention),
+# or a string with an explicit unit ("45 deg", "1.5 rad").
+AngleLike = Union[float, int, str]
+
 
 def _to_meters(v: LengthLike) -> float:
     """Parse a user-facing length value to meters."""
     return parse_length(v).meters
+
+
+def _to_radians(v: AngleLike) -> float:
+    """Parse a user-facing angle value to radians. Bare numbers = degrees."""
+    return parse_angle(v).radians
 
 
 class SketchPlane(Enum):
@@ -816,8 +825,8 @@ class SketchBuilder:
         self,
         center: Tuple[LengthLike, LengthLike],
         radius: LengthLike,
-        start_angle: float = 0.0,
-        end_angle: float = 180.0,
+        start_angle: AngleLike = 0.0,
+        end_angle: AngleLike = 180.0,
         is_construction: bool = False,
         variable_radius: Optional[str] = None,
         variable_center: Optional[Tuple[str, str]] = None,
@@ -827,8 +836,11 @@ class SketchBuilder:
         Args:
             center: Center point `(x, y)` (number = mm, or string with unit)
             radius: Radius (number = mm, or string with unit)
-            start_angle: Start angle in degrees (0 = positive X direction)
-            end_angle: End angle in degrees
+            start_angle: Start angle. Bare number = DEGREES (0 = positive X
+                direction); strings like "45 deg" or "1.5 rad" take their
+                explicit unit. Caller passing radians as a bare number will
+                silently get a near-zero arc — use the string form instead.
+            end_angle: End angle. Same parsing rules as `start_angle`.
             is_construction: Whether this is construction geometry
             variable_radius: Optional variable name. When set, a RADIUS
                 constraint with expression `#<var>` drives the arc radius
@@ -844,8 +856,8 @@ class SketchBuilder:
         cx_m, cy_m = _to_meters(cx), _to_meters(cy)
         radius_m = _to_meters(radius)
 
-        start_rad = math.radians(start_angle)
-        end_rad = math.radians(end_angle)
+        start_rad = _to_radians(start_angle)
+        end_rad = _to_radians(end_angle)
 
         arc_id = self._generate_entity_id("arc")
 

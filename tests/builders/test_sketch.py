@@ -353,6 +353,34 @@ class TestSketchBuilderArc:
         }
         assert dirs == {"HORIZONTAL": "#ax", "VERTICAL": "#ay"}
 
+    def test_add_arc_accepts_deg_string(self):
+        sketch = SketchBuilder()
+        sketch.add_arc(
+            center=(0, 0), radius=1, start_angle="45 deg", end_angle="135 deg"
+        )
+        entity = sketch.entities[0]
+        assert abs(entity["startParam"] - math.radians(45)) < 1e-10
+        assert abs(entity["endParam"] - math.radians(135)) < 1e-10
+
+    def test_add_arc_accepts_rad_string(self):
+        # 1.5 rad is a common "caller thought degrees, sent radians" bug.
+        # Here we explicitly TAG it as rad and expect the exact float back.
+        sketch = SketchBuilder()
+        sketch.add_arc(
+            center=(0, 0), radius=1, start_angle="0 rad", end_angle="1.5 rad"
+        )
+        entity = sketch.entities[0]
+        assert entity["startParam"] == 0.0
+        assert abs(entity["endParam"] - 1.5) < 1e-10
+
+    def test_add_arc_bare_number_is_degrees_not_radians(self):
+        # Guard against the peer's silent-error bug: 1.5 passed bare
+        # must be 1.5 DEGREES (tiny arc), not 1.5 radians (~86 deg).
+        sketch = SketchBuilder()
+        sketch.add_arc(center=(0, 0), radius=1, start_angle=0, end_angle=1.5)
+        entity = sketch.entities[0]
+        assert abs(entity["endParam"] - math.radians(1.5)) < 1e-10
+
 
 class TestSketchBuilderLine:
     """Test add_line functionality."""

@@ -5,7 +5,10 @@ import math
 import pytest
 
 from onshape_mcp.builders._units import (
+    Angle,
     Length,
+    parse_angle,
+    parse_angle_radians,
     parse_length,
     parse_length_meters,
     parse_length_expression,
@@ -111,3 +114,88 @@ class TestShorthands:
     def test_expression_shorthand(self):
         assert parse_length_expression(10) == "10 mm"
         assert parse_length_expression("1.5 in") == "1.5 in"
+
+
+# --- Angles ---------------------------------------------------------------
+
+
+class TestAngleBareNumbers:
+    def test_int_is_degrees(self):
+        a = parse_angle(45)
+        assert isinstance(a, Angle)
+        assert a.expression == "45 deg"
+        assert math.isclose(a.radians, math.pi / 4)
+
+    def test_float_is_degrees(self):
+        a = parse_angle(90.0)
+        assert a.expression == "90 deg"
+        assert math.isclose(a.radians, math.pi / 2)
+
+    def test_zero(self):
+        a = parse_angle(0)
+        assert a.expression == "0 deg"
+        assert a.radians == 0.0
+
+    def test_negative(self):
+        a = parse_angle(-30)
+        assert a.expression == "-30 deg"
+        assert math.isclose(a.radians, -math.pi / 6)
+
+    def test_non_integer(self):
+        a = parse_angle(22.5)
+        assert a.expression == "22.5 deg"
+        assert math.isclose(a.radians, math.radians(22.5))
+
+    def test_bool_rejected(self):
+        with pytest.raises(TypeError):
+            parse_angle(True)
+
+    def test_list_rejected(self):
+        with pytest.raises(TypeError):
+            parse_angle([45])
+
+
+class TestAngleStrings:
+    @pytest.mark.parametrize(
+        "value,expected_expr,expected_rad",
+        [
+            ("45 deg", "45 deg", math.pi / 4),
+            ("45deg", "45 deg", math.pi / 4),
+            ("90 degrees", "90 deg", math.pi / 2),
+            ("180 DEG", "180 deg", math.pi),
+            ("1.5 rad", "1.5 rad", 1.5),
+            ("1.5rad", "1.5 rad", 1.5),
+            ("3.14159 radians", "3.14159 rad", 3.14159),
+            ("-45 deg", "-45 deg", -math.pi / 4),
+        ],
+    )
+    def test_parses_canonical_round_trip(self, value, expected_expr, expected_rad):
+        a = parse_angle(value)
+        assert a.expression == expected_expr
+        assert math.isclose(a.radians, expected_rad, rel_tol=1e-9)
+
+    def test_string_without_unit_defaults_to_degrees(self):
+        # Bare "90" should be DEGREES, never radians, to match the bare-number rule.
+        a = parse_angle("90")
+        assert a.expression == "90 deg"
+        assert math.isclose(a.radians, math.pi / 2)
+
+
+class TestAngleErrors:
+    def test_empty_string(self):
+        with pytest.raises(ValueError, match="empty"):
+            parse_angle("")
+
+    def test_unparseable_garbage(self):
+        with pytest.raises(ValueError):
+            parse_angle("banana")
+
+    def test_unknown_unit(self):
+        with pytest.raises(ValueError, match="unknown angle unit"):
+            parse_angle("5 turns")
+
+
+class TestAngleShorthand:
+    def test_radians_shorthand(self):
+        assert math.isclose(parse_angle_radians(180), math.pi)
+        assert math.isclose(parse_angle_radians("1.5 rad"), 1.5)
