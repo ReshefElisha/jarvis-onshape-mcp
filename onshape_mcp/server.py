@@ -984,13 +984,21 @@ async def list_tools() -> list[Tool]:
                         ),
                     },
                     "startAngle": {
-                        "type": "number",
-                        "description": "Start angle in degrees (0 = positive X)",
+                        "type": ["number", "string"],
+                        "description": (
+                            "Start angle. Bare number = DEGREES (0 = positive X, "
+                            "the CAD convention); pass \"45 deg\" or \"1.5 rad\" "
+                            "for explicit units. Bare radians will NOT be detected — "
+                            "use the string form to avoid silent near-zero arcs."
+                        ),
                         "default": 0,
                     },
                     "endAngle": {
-                        "type": "number",
-                        "description": "End angle in degrees",
+                        "type": ["number", "string"],
+                        "description": (
+                            "End angle. Bare number = DEGREES; "
+                            "pass \"180 deg\" or \"3.14 rad\" for explicit units."
+                        ),
                         "default": 180,
                     },
                 },
@@ -1017,7 +1025,8 @@ async def list_tools() -> list[Tool]:
                 "  line:              {type, start:[x,y], end:[x,y]}\n"
                 "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
                 "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" for "
-                "explicit units."
+                "explicit units. Arc startAngle/endAngle default to DEGREES — "
+                "pass strings like \"1.5 rad\" when you need radians."
             ),
             inputSchema={
                 "type": "object",
@@ -1854,6 +1863,11 @@ def _feature_apply_json(
         payload["warnings"] = list(warnings)
     if notes:
         payload["notes"] = list(notes)
+    if result.changes is not None:
+        # "git diff" for CAD — only present when the handler asked the
+        # helper to track_changes. Topology-mutating tools default it on;
+        # sketches default it off (sketches don't change body topology).
+        payload["changes"] = result.changes
     return json.dumps(payload, indent=2)
 
 
@@ -2240,6 +2254,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["workspaceId"],
                 arguments["elementId"],
                 extrude.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(
                 result, tool_name=name, notes=notes,
@@ -2275,6 +2290,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["workspaceId"],
                 arguments["elementId"],
                 {"feature": thicken.build()},
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3423,6 +3439,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 fillet.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3443,6 +3460,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 chamfer.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3470,6 +3488,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 revolve.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:
@@ -3502,6 +3521,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 pattern.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3524,6 +3544,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 pattern.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3544,6 +3565,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 boolean.build(),
+                track_changes=True,
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except KeyError:

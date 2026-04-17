@@ -158,3 +158,98 @@ def parse_length_meters(value: Union[int, float, str]) -> float:
 def parse_length_expression(value: Union[int, float, str]) -> str:
     """Shorthand for `parse_length(value).expression` — for parameter fields."""
     return parse_length(value).expression
+
+
+# --- Angles ---------------------------------------------------------------
+#
+# Angle inputs (arc start/end, revolve angle, etc.) follow the same strategy
+# as lengths, but with a different default. CAD tooling almost universally
+# shows angles in degrees; engineers eyeball 45°, not 0.785 rad. So a bare
+# number here is DEGREES. Strings are parsed verbatim with a required unit
+# suffix ("deg" | "degrees" | "rad" | "radians") and normalized to degrees
+# or radians in the expression. Returns `Angle(expression, radians)` — the
+# radians field is what sketch geometry (startParam/endParam) consumes
+# directly; expression is preserved for any future BTMParameterQuantity use.
+
+_ANGLE_ALIASES: dict[str, str] = {
+    "deg": "deg",
+    "degs": "deg",
+    "degree": "deg",
+    "degrees": "deg",
+    "rad": "rad",
+    "rads": "rad",
+    "radian": "rad",
+    "radians": "rad",
+}
+
+_ANGLE_TO_RADIANS: dict[str, float] = {
+    "deg": 3.141592653589793 / 180.0,
+    "rad": 1.0,
+}
+
+DEFAULT_ANGLE_UNIT = "deg"
+
+
+@dataclass(frozen=True)
+class Angle:
+    """A parsed angle carrying both an Onshape expression and radians."""
+
+    expression: str
+    radians: float
+
+
+def parse_angle(value: Union[int, float, str]) -> Angle:
+    """Parse an angle input into an Onshape expression and radians.
+
+    Args:
+        value: Either a number (int/float), treated as DEGREES (the CAD
+            convention — engineers eyeball 45°, not 0.785 rad), or a string
+            with an explicit unit suffix ("45 deg", "1.5 rad",
+            "90 degrees", etc.). Strings without a unit also default to
+            degrees so that "90" is never a silent radians trap.
+
+    Returns:
+        Angle(expression, radians). `expression` is "<number> <deg|rad>".
+
+    Raises:
+        TypeError: `value` is not a number or string.
+        ValueError: string is unparseable or has an unknown unit.
+    """
+    if isinstance(value, bool):
+        raise TypeError(f"angle cannot be a bool, got {value!r}")
+
+    if isinstance(value, (int, float)):
+        num = float(value)
+        unit = DEFAULT_ANGLE_UNIT
+    elif isinstance(value, str):
+        s = value.strip()
+        if not s:
+            raise ValueError("angle string is empty")
+        match = _LENGTH_RE.match(s)
+        if not match:
+            raise ValueError(f"cannot parse angle {value!r}")
+        num = float(match.group("num"))
+        raw_unit = (match.group("unit") or DEFAULT_ANGLE_UNIT).strip().lower()
+        if raw_unit not in _ANGLE_ALIASES:
+            raise ValueError(
+                f"unknown angle unit {raw_unit!r} in {value!r}; "
+                f"supported units: deg, rad"
+            )
+        unit = _ANGLE_ALIASES[raw_unit]
+    else:
+        raise TypeError(
+            f"angle must be a number or string, got {type(value).__name__}"
+        )
+
+    radians = num * _ANGLE_TO_RADIANS[unit]
+    if num == int(num):
+        num_str = str(int(num))
+    else:
+        num_str = repr(num)
+    expression = f"{num_str} {unit}"
+    return Angle(expression=expression, radians=radians)
+
+
+def parse_angle_radians(value: Union[int, float, str]) -> float:
+    """Shorthand for `parse_angle(value).radians` — for raw geometry fields."""
+    return parse_angle(value).radians
