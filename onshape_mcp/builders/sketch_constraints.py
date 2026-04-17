@@ -355,6 +355,13 @@ def serialize(
     elif ctype == "VERTICAL_DISTANCE":
         ctype = "DISTANCE"
         direction = "VERTICAL"
+    elif ctype == "LENGTH":
+        # Natural-name alias for line-length: a DISTANCE between the line's
+        # endpoints. Also covers slot end-to-end dimensioning. Route to the
+        # MINIMUM-direction DISTANCE because LENGTH is orientation-agnostic.
+        ctype = "DISTANCE"
+        if direction is None:
+            direction = "MINIMUM"
 
     if ctype in _ENTITY_REF_ONLY:
         if value is not None:

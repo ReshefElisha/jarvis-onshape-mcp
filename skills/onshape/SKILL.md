@@ -105,8 +105,33 @@ Binary pair: `OFFSET` (offset entity ↔ master; pair with a `DISTANCE`
 constraint on the same two entities for the offset length).
 
 Aliases: `HORIZONTAL_DISTANCE` → `DISTANCE(direction=HORIZONTAL)`,
-`VERTICAL_DISTANCE` → `DISTANCE(direction=VERTICAL)`. `POINT_ON` is
-rejected — use `COINCIDENT` with a point sub-ref.
+`VERTICAL_DISTANCE` → `DISTANCE(direction=VERTICAL)`, `LENGTH` →
+`DISTANCE(direction=MINIMUM)` (for line length or slot end-to-end).
+`POINT_ON` is rejected — use `COINCIDENT` with a point sub-ref.
+
+### Pinning to the sketch origin
+
+There's no magic `origin` keyword. To anchor a sketch to the plane
+origin (prevents drift on parametric resize), add an explicit point
+entity at `[0, 0]` and `COINCIDENT` the geometry you want anchored
+to it:
+
+```json
+{
+  "entities": [
+    {"id": "origin", "type": "point", "at": [0, 0]},
+    {"id": "hub",    "type": "circle", "center": [0, 0], "radius": "25 mm"}
+  ],
+  "constraints": [
+    {"type": "COINCIDENT", "entities": ["hub.center", "origin"]},
+    {"type": "DIAMETER",   "entity": "hub", "value": "50 mm"}
+  ]
+}
+```
+
+The sketch-local origin point acts as a fixed anchor. Without it,
+dimensions parametrize fine but positions drift when variables
+change — hub.center can slide ~1 mm when you retarget dimensions.
 
 ### Gotchas
 
