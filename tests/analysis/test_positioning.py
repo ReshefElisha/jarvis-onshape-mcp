@@ -87,11 +87,21 @@ class TestBuildAbsoluteTranslationMatrix:
             0.0, 0.0, 0.0, 1.0,
         ]
 
-    def test_converts_inches_to_meters(self):
+    def test_converts_mm_to_meters(self):
+        """Bare numbers default to mm under the new-forward units convention."""
         result = build_absolute_translation_matrix(10, -5, 3)
-        assert result[3] == pytest.approx(10 * 0.0254)
-        assert result[7] == pytest.approx(-5 * 0.0254)
-        assert result[11] == pytest.approx(3 * 0.0254)
+        # 10 mm = 0.010 m, -5 mm = -0.005 m, 3 mm = 0.003 m
+        assert result[3] == pytest.approx(0.010)
+        assert result[7] == pytest.approx(-0.005)
+        assert result[11] == pytest.approx(0.003)
+
+    def test_explicit_unit_strings(self):
+        """Strings with explicit units round-trip to meters."""
+        result = build_absolute_translation_matrix("0.5 in", "10 mm", "0.01 m")
+        # 0.5 in = 0.0127 m
+        assert result[3] == pytest.approx(0.0127)
+        assert result[7] == pytest.approx(0.010)
+        assert result[11] == pytest.approx(0.010)
 
     def test_rotation_is_identity(self):
         result = build_absolute_translation_matrix(1, 2, 3)
@@ -220,30 +230,31 @@ class TestFormatPositionsReport:
         assert "No instances" in result
 
     def test_single_position_formatting(self):
+        """Formatted report renders mm values now, not inches."""
         pos = InstancePositionInfo(
             name="Test Part",
             instance_id="id1",
-            position_x_inches=10.0,
-            position_y_inches=-5.0,
-            position_z_inches=0.0,
-            size_x_inches=2.0,
-            size_y_inches=3.0,
-            size_z_inches=4.0,
-            world_low_x_inches=9.0,
-            world_low_y_inches=-6.5,
-            world_low_z_inches=-2.0,
-            world_high_x_inches=11.0,
-            world_high_y_inches=-3.5,
-            world_high_z_inches=2.0,
+            position_x_mm=10.0,
+            position_y_mm=-5.0,
+            position_z_mm=0.0,
+            size_x_mm=2.0,
+            size_y_mm=3.0,
+            size_z_mm=4.0,
+            world_low_x_mm=9.0,
+            world_low_y_mm=-6.5,
+            world_low_z_mm=-2.0,
+            world_high_x_mm=11.0,
+            world_high_y_mm=-3.5,
+            world_high_z_mm=2.0,
         )
         result = format_positions_report([pos])
         assert "Test Part" in result
         assert "id1" in result
-        assert "10.000" in result
-        assert "-5.000" in result
-        assert '2.000" W' in result
-        assert '3.000" D' in result
-        assert '4.000" H' in result
+        assert "10.00 mm" in result
+        assert "-5.00 mm" in result
+        assert "2.00 mm W" in result
+        assert "3.00 mm D" in result
+        assert "4.00 mm H" in result
 
     def test_multiple_positions(self):
         positions = [
@@ -373,6 +384,7 @@ class TestSetAbsolutePosition:
         mock_asm = AsyncMock()
         mock_asm.transform_occurrences.return_value = {}
 
+        # set_absolute_position returns (msg, mm_tuple); don't assign here.
         await set_absolute_position(mock_asm, "d", "w", "e", "inst1", 10.0, -5.0, 3.0)
 
         mock_asm.transform_occurrences.assert_called_once()
@@ -381,6 +393,7 @@ class TestSetAbsolutePosition:
 
     @pytest.mark.asyncio
     async def test_correct_matrix_values(self):
+        """Bare numeric inputs interpreted as mm; matrix translates in meters."""
         mock_asm = AsyncMock()
         mock_asm.transform_occurrences.return_value = {}
 
@@ -389,21 +402,25 @@ class TestSetAbsolutePosition:
         args = mock_asm.transform_occurrences.call_args
         occurrences = args[0][3]  # 4th positional arg
         transform = occurrences[0]["transform"]
-        assert transform[3] == pytest.approx(10.0 * 0.0254)
-        assert transform[7] == pytest.approx(-5.0 * 0.0254)
-        assert transform[11] == pytest.approx(3.0 * 0.0254)
+        # 10 mm = 0.010 m, -5 mm = -0.005 m, 3 mm = 0.003 m
+        assert transform[3] == pytest.approx(0.010)
+        assert transform[7] == pytest.approx(-0.005)
+        assert transform[11] == pytest.approx(0.003)
 
     @pytest.mark.asyncio
     async def test_returns_confirmation_message(self):
         mock_asm = AsyncMock()
         mock_asm.transform_occurrences.return_value = {}
 
-        result = await set_absolute_position(mock_asm, "d", "w", "e", "inst1", 10.0, -5.0, 3.0)
+        msg, mm_tuple = await set_absolute_position(
+            mock_asm, "d", "w", "e", "inst1", 10.0, -5.0, 3.0
+        )
 
-        assert "inst1" in result
-        assert "10.000" in result
-        assert "-5.000" in result
-        assert "3.000" in result
+        assert "inst1" in msg
+        assert "10.00 mm" in msg
+        assert "-5.00 mm" in msg
+        assert "3.00 mm" in msg
+        assert mm_tuple == pytest.approx((10.0, -5.0, 3.0))
 
 
 class TestAlignToFace:
@@ -457,14 +474,14 @@ class TestAlignToFace:
             mock_asm, mock_ps, "d", "w", "e", "door", "side", "front"
         )
 
-        # Side front face (min Y) = -0.4064m
-        # Door should be placed so its high_y (0) touches side's low_y (-0.4064)
-        # new_y = -0.4064 - 0 = -0.4064m = -16"
+        # Side front face (min Y) = -0.4064 m = -406.4 mm
+        # Door should be placed so its high_y (0) touches side's low_y.
+        # new_y = -0.4064 m = -406.40 mm (post-[units-asm], report prints mm).
         assert "Aligned" in result
         assert "front" in result
-        assert "-16.000" in result
+        assert "-406.40 mm" in result
 
-        # Verify transform_occurrences was called with correct position
+        # Verify transform_occurrences was called with correct position (meters).
         call_args = mock_asm.transform_occurrences.call_args
         occurrences = call_args[0][3]
         transform = occurrences[0]["transform"]

@@ -76,13 +76,15 @@ class TestMateConnectorBuilder:
             mc.set_secondary_axis("INVALID")
 
     def test_set_translation(self):
+        """Inputs default to mm and are stored as meters on the internal fields."""
         mc = MateConnectorBuilder()
         result = mc.set_translation(1.0, 2.0, 3.0)
         assert result is mc
         assert mc._transform_enabled is True
-        assert mc._translation_x == 1.0
-        assert mc._translation_y == 2.0
-        assert mc._translation_z == 3.0
+        # 1 mm, 2 mm, 3 mm -> meters
+        assert mc._translation_x == pytest.approx(0.001)
+        assert mc._translation_y == pytest.approx(0.002)
+        assert mc._translation_z == pytest.approx(0.003)
 
     def test_set_rotation(self):
         mc = MateConnectorBuilder()
@@ -207,6 +209,7 @@ class TestMateConnectorBuilder:
         assert "rotation" not in param_ids
 
     def test_build_with_translation(self):
+        """Bare numbers default to mm: 1.0 → 0.001 m, 2.0 → 0.002 m, etc."""
         mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
         mc.set_translation(1.0, 2.0, 3.0)
         result = mc.build()
@@ -218,9 +221,23 @@ class TestMateConnectorBuilder:
         tx = next(p for p in params if p["parameterId"] == "translationX")
         ty = next(p for p in params if p["parameterId"] == "translationY")
         tz = next(p for p in params if p["parameterId"] == "translationZ")
-        assert f"{1.0 * 0.0254} m" in tx["expression"]
-        assert f"{2.0 * 0.0254} m" in ty["expression"]
-        assert f"{3.0 * 0.0254} m" in tz["expression"]
+        assert "0.001 m" in tx["expression"]
+        assert "0.002 m" in ty["expression"]
+        assert "0.003 m" in tz["expression"]
+
+    def test_build_with_translation_unit_strings(self):
+        """Explicit-unit strings on set_translation round-trip correctly."""
+        mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
+        mc.set_translation("0.5 in", "10 mm", "0.01 m")
+        result = mc.build()
+        params = result["feature"]["parameters"]
+        tx = next(p for p in params if p["parameterId"] == "translationX")
+        ty = next(p for p in params if p["parameterId"] == "translationY")
+        tz = next(p for p in params if p["parameterId"] == "translationZ")
+        # 0.5 in = 0.0127 m, 10 mm = 0.01 m, 0.01 m = 0.01 m
+        assert "0.0127 m" in tx["expression"]
+        assert "0.01 m" in ty["expression"]
+        assert "0.01 m" in tz["expression"]
 
     def test_build_with_rotation(self):
         mc = MateConnectorBuilder(face_id="JHW", occurrence_path=["inst1"])
@@ -332,12 +349,13 @@ class TestBuildTransformMatrix:
             assert abs(actual - exp) < 1e-10
 
     def test_translation_only(self):
+        """Bare numbers default to mm: 1.0 → 0.001 m in the matrix."""
         matrix = build_transform_matrix(tx=1.0, ty=2.0, tz=3.0)
         assert len(matrix) == 16
-        # Translation in meters
-        assert abs(matrix[3] - 1.0 * 0.0254) < 1e-10
-        assert abs(matrix[7] - 2.0 * 0.0254) < 1e-10
-        assert abs(matrix[11] - 3.0 * 0.0254) < 1e-10
+        # Translation in meters (mm / 1000)
+        assert abs(matrix[3] - 0.001) < 1e-10
+        assert abs(matrix[7] - 0.002) < 1e-10
+        assert abs(matrix[11] - 0.003) < 1e-10
         # Rotation part should be identity
         assert abs(matrix[0] - 1.0) < 1e-10
         assert abs(matrix[5] - 1.0) < 1e-10
@@ -393,6 +411,8 @@ class TestMateBuilderLimits:
         assert "limitsEnabled" not in param_ids
 
     def test_build_slider_with_limits(self):
+        """Slider limits: bare numbers default to mm (matches the new-forward
+        units convention). -2.0 → -0.002 m, 5.0 → 0.005 m."""
         mb = MateBuilder(mate_type=MateType.SLIDER)
         mb.set_first_connector("mc_a")
         mb.set_second_connector("mc_b")
@@ -407,8 +427,22 @@ class TestMateBuilderLimits:
         max_param = next(p for p in params if p["parameterId"] == "limitZMax")
         assert min_param["btType"] == "BTMParameterNullableQuantity-807"
         assert min_param["isNull"] is False
-        assert f"{-2.0 * 0.0254} m" in min_param["expression"]
-        assert f"{5.0 * 0.0254} m" in max_param["expression"]
+        assert "-0.002 m" in min_param["expression"]
+        assert "0.005 m" in max_param["expression"]
+
+    def test_build_slider_with_unit_string_limits(self):
+        """Explicit-unit strings on slider limits round-trip correctly."""
+        mb = MateBuilder(mate_type=MateType.SLIDER)
+        mb.set_first_connector("mc_a")
+        mb.set_second_connector("mc_b")
+        mb.set_limits("-0.5 in", "1 in")
+        result = mb.build()
+        params = result["feature"]["parameters"]
+        min_param = next(p for p in params if p["parameterId"] == "limitZMin")
+        max_param = next(p for p in params if p["parameterId"] == "limitZMax")
+        # -0.5 in = -0.0127 m, 1 in = 0.0254 m
+        assert "-0.0127 m" in min_param["expression"]
+        assert "0.0254 m" in max_param["expression"]
 
     def test_build_revolute_with_limits(self):
         mb = MateBuilder(mate_type=MateType.REVOLUTE)
@@ -426,6 +460,7 @@ class TestMateBuilderLimits:
         assert "rad" in max_param["expression"]
 
     def test_build_cylindrical_with_limits(self):
+        """Bare numbers = mm. 12.0 → 0.012 m."""
         mb = MateBuilder(mate_type=MateType.CYLINDRICAL)
         mb.set_first_connector("mc_a")
         mb.set_second_connector("mc_b")
@@ -437,8 +472,8 @@ class TestMateBuilderLimits:
         max_param = next(p for p in params if p["parameterId"] == "limitZMax")
         assert min_param["btType"] == "BTMParameterNullableQuantity-807"
         assert min_param["isNull"] is False
-        assert f"{0 * 0.0254} m" in min_param["expression"]
-        assert f"{12.0 * 0.0254} m" in max_param["expression"]
+        assert "0.0 m" in min_param["expression"]
+        assert "0.012 m" in max_param["expression"]
 
     def test_build_fastened_with_limits_no_crash(self):
         """Fastened mates don't have limits, but setting them should not crash."""

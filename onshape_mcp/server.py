@@ -30,6 +30,7 @@ from .api.featurescript import FeatureScriptManager
 from .api.export import ExportManager
 from .api.feature_apply import (
     apply_feature_and_check,
+    apply_assembly_feature_and_check,
     update_feature_params_and_check,
     FeatureApplyResult,
 )
@@ -634,7 +635,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="transform_instance",
-            description="Apply a RELATIVE transform to an assembly instance (inches and degrees). Note: fails on fixed/grounded instances — use get_assembly_positions to check the 'fixed' flag first.",
+            description="Apply a RELATIVE transform to an assembly instance. Translations: bare numbers = mm; strings like \"20 mm\" / \"0.5 in\" for explicit units. Rotations: degrees. Note: fails on fixed/grounded instances — use get_assembly_positions to check the 'fixed' flag first.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -642,9 +643,9 @@ async def list_tools() -> list[Tool]:
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
                     "elementId": {"type": "string", "description": "Assembly element ID"},
                     "instanceId": {"type": "string", "description": "Instance ID to transform"},
-                    "translateX": {"type": "number", "description": "X translation in inches", "default": 0},
-                    "translateY": {"type": "number", "description": "Y translation in inches", "default": 0},
-                    "translateZ": {"type": "number", "description": "Z translation in inches", "default": 0},
+                    "translateX": {"type": ["number", "string"], "description": "X translation. Bare numbers = mm; strings like \"10 mm\" / \"0.5 in\" respected.", "default": 0},
+                    "translateY": {"type": ["number", "string"], "description": "Y translation. Bare = mm; unit-strings respected.", "default": 0},
+                    "translateZ": {"type": ["number", "string"], "description": "Z translation. Bare = mm; unit-strings respected.", "default": 0},
                     "rotateX": {"type": "number", "description": "X rotation in degrees", "default": 0},
                     "rotateY": {"type": "number", "description": "Y rotation in degrees", "default": 0},
                     "rotateZ": {"type": "number", "description": "Z rotation in degrees", "default": 0},
@@ -666,12 +667,12 @@ async def list_tools() -> list[Tool]:
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
                     "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance (from body details)"},
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance (from body details)"},
-                    "firstOffsetX": {"type": "number", "description": "First connector X offset from face center in inches", "default": 0},
-                    "firstOffsetY": {"type": "number", "description": "First connector Y offset from face center in inches", "default": 0},
-                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset (along face normal) in inches", "default": 0},
-                    "secondOffsetX": {"type": "number", "description": "Second connector X offset from face center in inches", "default": 0},
-                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset from face center in inches", "default": 0},
-                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset (along face normal) in inches", "default": 0},
+                    "firstOffsetX": {"type": ["number", "string"], "description": "First connector X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstOffsetY": {"type": ["number", "string"], "description": "First connector Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstOffsetZ": {"type": ["number", "string"], "description": "First connector Z offset (along face normal). Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset (along face normal). Bare = mm; unit-strings respected.", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -692,12 +693,12 @@ async def list_tools() -> list[Tool]:
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
                     "minLimit": {"type": "number", "description": "Optional minimum rotation limit in degrees"},
                     "maxLimit": {"type": "number", "description": "Optional maximum rotation limit in degrees"},
-                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
-                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
-                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
-                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
-                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
-                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
+                    "firstOffsetX": {"type": ["number", "string"], "description": "First connector X offset. Bare numbers = mm; strings like \"10 mm\" / \"0.5 in\" respected.", "default": 0},
+                    "firstOffsetY": {"type": ["number", "string"], "description": "First connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstOffsetZ": {"type": ["number", "string"], "description": "First connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -716,14 +717,14 @@ async def list_tools() -> list[Tool]:
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
                     "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance"},
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
-                    "minLimit": {"type": "number", "description": "Optional minimum travel limit in inches"},
-                    "maxLimit": {"type": "number", "description": "Optional maximum travel limit in inches"},
-                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
-                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
-                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
-                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
-                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
-                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
+                    "minLimit": {"type": ["number", "string"], "description": "Optional minimum travel limit. Bare = mm; unit-strings respected."},
+                    "maxLimit": {"type": ["number", "string"], "description": "Optional maximum travel limit. Bare = mm; unit-strings respected."},
+                    "firstOffsetX": {"type": ["number", "string"], "description": "First connector X offset. Bare numbers = mm; strings like \"10 mm\" / \"0.5 in\" respected.", "default": 0},
+                    "firstOffsetY": {"type": ["number", "string"], "description": "First connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstOffsetZ": {"type": ["number", "string"], "description": "First connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -742,14 +743,14 @@ async def list_tools() -> list[Tool]:
                     "secondInstanceId": {"type": "string", "description": "Second instance ID"},
                     "firstFaceId": {"type": "string", "description": "Face deterministic ID on the first instance"},
                     "secondFaceId": {"type": "string", "description": "Face deterministic ID on the second instance"},
-                    "minLimit": {"type": "number", "description": "Optional minimum axial travel limit in inches"},
-                    "maxLimit": {"type": "number", "description": "Optional maximum axial travel limit in inches"},
-                    "firstOffsetX": {"type": "number", "description": "First connector X offset in inches", "default": 0},
-                    "firstOffsetY": {"type": "number", "description": "First connector Y offset in inches", "default": 0},
-                    "firstOffsetZ": {"type": "number", "description": "First connector Z offset in inches", "default": 0},
-                    "secondOffsetX": {"type": "number", "description": "Second connector X offset in inches", "default": 0},
-                    "secondOffsetY": {"type": "number", "description": "Second connector Y offset in inches", "default": 0},
-                    "secondOffsetZ": {"type": "number", "description": "Second connector Z offset in inches", "default": 0},
+                    "minLimit": {"type": ["number", "string"], "description": "Optional minimum axial travel limit. Bare = mm; unit-strings respected."},
+                    "maxLimit": {"type": ["number", "string"], "description": "Optional maximum axial travel limit. Bare = mm; unit-strings respected."},
+                    "firstOffsetX": {"type": ["number", "string"], "description": "First connector X offset. Bare numbers = mm; strings like \"10 mm\" / \"0.5 in\" respected.", "default": 0},
+                    "firstOffsetY": {"type": ["number", "string"], "description": "First connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstOffsetZ": {"type": ["number", "string"], "description": "First connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -773,9 +774,9 @@ async def list_tools() -> list[Tool]:
                         "description": "Reorient secondary axis",
                         "default": "PLUS_X",
                     },
-                    "offsetX": {"type": "number", "description": "X offset from face center in inches", "default": 0},
-                    "offsetY": {"type": "number", "description": "Y offset from face center in inches", "default": 0},
-                    "offsetZ": {"type": "number", "description": "Z offset (along face normal) from face center in inches", "default": 0},
+                    "offsetX": {"type": ["number", "string"], "description": "X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "offsetY": {"type": ["number", "string"], "description": "Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "offsetZ": {"type": ["number", "string"], "description": "Z offset (along face normal) from face center. Bare = mm; unit-strings respected.", "default": 0},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
@@ -1288,7 +1289,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_assembly_positions",
-            description="Get positions, sizes, and world-space bounds of all instances in an assembly (in inches)",
+            description="Get positions, sizes, and world-space bounds of all instances in an assembly (in mm).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1301,7 +1302,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="set_instance_position",
-            description="Set an instance to an ABSOLUTE position in inches (unlike transform_instance which is relative). Resets rotation to identity. Note: fails on fixed/grounded instances (API returns 400).",
+            description="Set an instance to an ABSOLUTE position (bare numbers = mm; strings like \"20 mm\" / \"0.5 in\" for explicit units). Unlike transform_instance this sets absolute coords and resets rotation to identity. Note: fails on fixed/grounded instances (API returns 400).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1309,9 +1310,9 @@ async def list_tools() -> list[Tool]:
                     "workspaceId": {"type": "string", "description": "Workspace ID"},
                     "elementId": {"type": "string", "description": "Assembly element ID"},
                     "instanceId": {"type": "string", "description": "Instance ID to position"},
-                    "x": {"type": "number", "description": "Absolute X position in inches"},
-                    "y": {"type": "number", "description": "Absolute Y position in inches"},
-                    "z": {"type": "number", "description": "Absolute Z position in inches"},
+                    "x": {"type": ["number", "string"], "description": "Absolute X position. Bare = mm; unit-strings like \"20 mm\" / \"0.5 in\" respected."},
+                    "y": {"type": ["number", "string"], "description": "Absolute Y position. Bare = mm; unit-strings respected."},
+                    "z": {"type": ["number", "string"], "description": "Absolute Z position. Bare = mm; unit-strings respected."},
                 },
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "x", "y", "z"],
             },
@@ -1931,7 +1932,7 @@ def _extract_offsets(arguments: dict, prefix: str) -> tuple[float, float, float]
 
 
 async def _create_mate(
-    assembly_manager,
+    onshape_client,
     document_id: str,
     workspace_id: str,
     element_id: str,
@@ -1945,20 +1946,30 @@ async def _create_mate(
     max_limit: float | None = None,
     first_offset: tuple[float, float, float] | None = None,
     second_offset: tuple[float, float, float] | None = None,
-) -> str:
+) -> FeatureApplyResult:
     """Create a mate between two instances using explicit mate connectors.
 
-    Creates mate connectors on faces of each instance, then creates the mate
-    between them. Uses BTMInferenceQueryWithOccurrence-1083 with CENTROID
-    inference to place connectors at face centers.
+    Creates mate connector MC1 on a face of instance 1, mate connector MC2 on
+    a face of instance 2, then the BTMMate-64 that binds them. Each POST
+    rides through `apply_assembly_feature_and_check`, so a MC or mate that
+    the solver rejects surfaces as `status=ERROR` instead of the old prose
+    "Created fastened mate ..." silent-success return.
+
+    Fail-fast: if MC1 or MC2 errors at featureStatus level, the function
+    returns that result without trying to build the mate on top of broken
+    connectors. The returned result carries the feature_id/status of the
+    first failing step, so the caller can surface it verbatim.
 
     Args:
-        first_offset: Optional (x, y, z) offset in inches from first face centroid
-        second_offset: Optional (x, y, z) offset in inches from second face centroid
+        first_offset: Optional (x, y, z) offset in meters from first face
+            centroid. mm-default conversion happens at the tool-handler layer.
+        second_offset: Same for the second connector.
 
-    Returns the mate feature ID.
+    Returns:
+        FeatureApplyResult representing the final mate (or the first failing
+        MC/mate step if something earlier broke).
     """
-    # Create explicit mate connector on a face of the first instance
+    # MC1
     mc1 = MateConnectorBuilder(
         name=f"{mate_name} - MC1",
         face_id=first_face_id,
@@ -1966,13 +1977,13 @@ async def _create_mate(
     )
     if first_offset:
         mc1.set_translation(*first_offset)
-    result1 = await assembly_manager.add_feature(
-        document_id=document_id, workspace_id=workspace_id,
-        element_id=element_id, feature_data=mc1.build(),
+    mc1_result = await apply_assembly_feature_and_check(
+        onshape_client, document_id, workspace_id, element_id, mc1.build(),
     )
-    mc1_id = result1.get("feature", {}).get("featureId", "unknown")
+    if not mc1_result.ok:
+        return mc1_result
 
-    # Create explicit mate connector on a face of the second instance
+    # MC2
     mc2 = MateConnectorBuilder(
         name=f"{mate_name} - MC2",
         face_id=second_face_id,
@@ -1980,23 +1991,21 @@ async def _create_mate(
     )
     if second_offset:
         mc2.set_translation(*second_offset)
-    result2 = await assembly_manager.add_feature(
-        document_id=document_id, workspace_id=workspace_id,
-        element_id=element_id, feature_data=mc2.build(),
+    mc2_result = await apply_assembly_feature_and_check(
+        onshape_client, document_id, workspace_id, element_id, mc2.build(),
     )
-    mc2_id = result2.get("feature", {}).get("featureId", "unknown")
+    if not mc2_result.ok:
+        return mc2_result
 
-    # Create the mate referencing the explicit mate connectors
+    # The mate itself
     mate = MateBuilder(name=mate_name, mate_type=mate_type)
-    mate.set_first_connector(mc1_id)
-    mate.set_second_connector(mc2_id)
+    mate.set_first_connector(mc1_result.feature_id)
+    mate.set_second_connector(mc2_result.feature_id)
     if min_limit is not None and max_limit is not None:
         mate.set_limits(min_limit, max_limit)
-    result = await assembly_manager.add_feature(
-        document_id=document_id, workspace_id=workspace_id,
-        element_id=element_id, feature_data=mate.build(),
+    return await apply_assembly_feature_and_check(
+        onshape_client, document_id, workspace_id, element_id, mate.build(),
     )
-    return result.get("feature", {}).get("featureId", "unknown")
 
 
 @app.call_tool()
@@ -2900,44 +2909,65 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 workspace_id=arguments["workspaceId"],
                 name=arguments["name"],
             )
-            element_id = result.get("id", "unknown")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Created Assembly '{arguments['name']}'\nElement ID: {element_id}",
-                )
-            ]
+            element_id = result.get("id", "")
+            payload = {
+                "ok": bool(element_id),
+                "status": "OK" if element_id else "UNKNOWN",
+                "element_id": element_id,
+                "element_name": arguments["name"],
+                "error_message": None if element_id else "API did not return an element id",
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error creating assembly: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error creating assembly: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating assembly")
-            return [TextContent(type="text", text=f"Error creating assembly: {str(e)}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "add_assembly_instance":
         try:
-            result = await assembly_manager.add_instance(
-                document_id=arguments["documentId"],
-                workspace_id=arguments["workspaceId"],
-                element_id=arguments["elementId"],
+            # add_instance returns {} (Onshape quirk). Diff the instance list
+            # pre/post to surface the new instance id so the caller doesn't
+            # have to follow up with get_assembly.
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            asm_eid = arguments["elementId"]
+            before = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            before_ids = {
+                i.get("id") for i in before.get("rootAssembly", {}).get("instances", [])
+            }
+            await assembly_manager.add_instance(
+                document_id=doc_id,
+                workspace_id=ws_id,
+                element_id=asm_eid,
                 part_studio_element_id=arguments["partStudioElementId"],
                 part_id=arguments.get("partId"),
                 is_assembly=arguments.get("isAssembly", False),
             )
-            instance_id = result.get("id", "unknown")
-            instance_name = result.get("name", "unnamed")
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Added instance '{instance_name}' to assembly.\nInstance ID: {instance_id}",
-                )
-            ]
+            after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            after_instances = after.get("rootAssembly", {}).get("instances", [])
+            new_instances = [i for i in after_instances if i.get("id") not in before_ids]
+            if new_instances:
+                new_inst = new_instances[-1]
+                instance_id = new_inst.get("id", "")
+                instance_name = new_inst.get("name", "")
+            else:
+                instance_id, instance_name = "", ""
+            payload = {
+                "ok": bool(instance_id),
+                "status": "OK" if instance_id else "UNKNOWN",
+                "instance_id": instance_id,
+                "instance_name": instance_name,
+                "error_message": None if instance_id else "Could not diff-identify the new instance",
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error adding instance: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error adding instance: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error adding instance")
-            return [TextContent(type="text", text=f"Error adding instance: {str(e)}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "transform_instance":
         try:
@@ -2956,101 +2986,94 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 element_id=arguments["elementId"],
                 occurrences=occurrences,
             )
-            return [TextContent(type="text", text=f"Transformed instance {arguments['instanceId']}.")]
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "instance_id": arguments["instanceId"],
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error transforming instance: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error transforming instance: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error transforming instance")
-            return [TextContent(type="text", text=f"Error transforming instance: {str(e)}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fastened_mate":
         try:
-            mate_name = arguments.get("name", "Fastened mate")
-            feature_id = await _create_mate(
-                assembly_manager,
+            mate_result = await _create_mate(
+                client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 arguments["firstInstanceId"], arguments["secondInstanceId"],
                 arguments["firstFaceId"], arguments["secondFaceId"],
-                mate_name, MateType.FASTENED,
+                arguments.get("name", "Fastened mate"), MateType.FASTENED,
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
             )
-            return [TextContent(type="text", text=f"Created fastened mate '{mate_name}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            error_body = ""
-            try:
-                error_body = e.response.text[:500]
-            except Exception:
-                pass
-            logger.error(f"API error creating mate: {e.response.status_code} - {error_body}")
-            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}. Details: {error_body}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            logger.exception("Unexpected error creating mate")
-            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+            logger.exception("Unexpected error creating fastened mate")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_revolute_mate":
         try:
-            mate_name = arguments.get("name", "Revolute mate")
-            feature_id = await _create_mate(
-                assembly_manager,
+            mate_result = await _create_mate(
+                client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 arguments["firstInstanceId"], arguments["secondInstanceId"],
                 arguments["firstFaceId"], arguments["secondFaceId"],
-                mate_name, MateType.REVOLUTE,
+                arguments.get("name", "Revolute mate"), MateType.REVOLUTE,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
             )
-            return [TextContent(type="text", text=f"Created revolute mate '{mate_name}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error creating mate: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            logger.exception("Unexpected error creating mate")
-            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+            logger.exception("Unexpected error creating revolute mate")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_slider_mate":
         try:
-            mate_name = arguments.get("name", "Slider mate")
-            feature_id = await _create_mate(
-                assembly_manager,
+            mate_result = await _create_mate(
+                client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 arguments["firstInstanceId"], arguments["secondInstanceId"],
                 arguments["firstFaceId"], arguments["secondFaceId"],
-                mate_name, MateType.SLIDER,
+                arguments.get("name", "Slider mate"), MateType.SLIDER,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
             )
-            return [TextContent(type="text", text=f"Created slider mate '{mate_name}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error creating mate: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            logger.exception("Unexpected error creating mate")
-            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+            logger.exception("Unexpected error creating slider mate")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_cylindrical_mate":
         try:
-            mate_name = arguments.get("name", "Cylindrical mate")
-            feature_id = await _create_mate(
-                assembly_manager,
+            mate_result = await _create_mate(
+                client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
                 arguments["firstInstanceId"], arguments["secondInstanceId"],
                 arguments["firstFaceId"], arguments["secondFaceId"],
-                mate_name, MateType.CYLINDRICAL,
+                arguments.get("name", "Cylindrical mate"), MateType.CYLINDRICAL,
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
             )
-            return [TextContent(type="text", text=f"Created cylindrical mate '{mate_name}'. Feature ID: {feature_id}")]
+            return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            logger.error(f"API error creating mate: {e.response.status_code}")
-            return [TextContent(type="text", text=f"Error creating mate: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            logger.exception("Unexpected error creating mate")
-            return [TextContent(type="text", text=f"Error creating mate: {str(e)}")]
+            logger.exception("Unexpected error creating cylindrical mate")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_mate_connector":
         try:
@@ -3069,27 +3092,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             oz = arguments.get("offsetZ", 0)
             if ox != 0 or oy != 0 or oz != 0:
                 mc.set_translation(ox, oy, oz)
-            result = await assembly_manager.add_feature(
-                document_id=arguments["documentId"],
-                workspace_id=arguments["workspaceId"],
-                element_id=arguments["elementId"],
-                feature_data=mc.build(),
+            mc_result = await apply_assembly_feature_and_check(
+                client,
+                arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
+                mc.build(),
             )
-            feature_id = result.get("feature", {}).get("featureId", "unknown")
-            return [TextContent(type="text", text=f"Created mate connector '{arguments.get('name', 'Mate connector')}' on instance {arguments['instanceId']}. Feature ID: {feature_id}")]
-        except ValueError as e:
-            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+            return [TextContent(type="text", text=_feature_apply_json(mc_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
-            error_body = ""
-            try:
-                error_body = e.response.text[:500]
-            except Exception:
-                pass
-            logger.error(f"API error creating mate connector: {e.response.status_code} - {error_body}")
-            return [TextContent(type="text", text=f"Error creating mate connector: API returned {e.response.status_code}. Details: {error_body}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating mate connector")
-            return [TextContent(type="text", text=f"Error creating mate connector: {str(e)}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_sketch_circle":
         try:
@@ -3507,21 +3520,31 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "set_instance_position":
         try:
-            msg = await set_absolute_position(
+            msg, (x_mm, y_mm, z_mm) = await set_absolute_position(
                 assembly_manager=assembly_manager,
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
                 element_id=arguments["elementId"],
                 instance_id=arguments["instanceId"],
-                x_inches=arguments["x"],
-                y_inches=arguments["y"],
-                z_inches=arguments["z"],
+                x=arguments["x"],
+                y=arguments["y"],
+                z=arguments["z"],
             )
-            return [TextContent(type="text", text=msg)]
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "instance_id": arguments["instanceId"],
+                "position_mm": {"x": x_mm, "y": y_mm, "z": z_mm},
+                "message": msg,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error setting position: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error setting position: {str(e)}")]
+            logger.exception("Unexpected error setting instance position")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "align_instance_to_face":
         try:
@@ -3535,13 +3558,24 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 target_instance_id=arguments["targetInstanceId"],
                 face=arguments["face"],
             )
-            return [TextContent(type="text", text=msg)]
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "source_instance_id": arguments["sourceInstanceId"],
+                "target_instance_id": arguments["targetInstanceId"],
+                "face": arguments["face"],
+                "message": msg,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
         except httpx.HTTPStatusError as e:
-            return [TextContent(type="text", text=f"Error aligning instance: API returned {e.response.status_code}.")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except ValueError as e:
-            return [TextContent(type="text", text=f"Invalid input: {str(e)}")]
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
         except Exception as e:
-            return [TextContent(type="text", text=f"Error aligning instance: {str(e)}")]
+            logger.exception("Unexpected error aligning instance")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "get_body_details":
         try:
