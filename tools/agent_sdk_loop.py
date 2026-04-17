@@ -91,11 +91,14 @@ async def run(brief: str, out_dir: Path, *, max_turns: int = 40) -> dict:
         "Protocol guide (follow strictly):\n" + skill
     )
 
+    # Block the dangerous built-in tools. allowed_tools is ignored under
+    # bypassPermissions, so use disallowed_tools to keep Claude out of
+    # Bash / Edit / WebFetch / etc. (It still needs Read/Write to think
+    # on paper.)
     options = ClaudeAgentOptions(
         mcp_servers={
             "onshape": {
-                # Run the MCP server from this repo's uv env so it picks up
-                # the same dependencies + .env that our test suite uses.
+                "type": "stdio",
                 "command": "uv",
                 "args": [
                     "--directory", str(REPO),
@@ -103,14 +106,16 @@ async def run(brief: str, out_dir: Path, *, max_turns: int = 40) -> dict:
                 ],
             }
         },
-        allowed_tools=[
-            "mcp__onshape__*",
-            # Claude often wants to think on paper; let it write notes.
-            "Read", "Write",
+        disallowed_tools=[
+            "Bash", "Edit", "MultiEdit", "WebFetch", "WebSearch",
+            "Task", "NotebookEdit", "KillShell", "BashOutput",
         ],
         permission_mode="bypassPermissions",
         system_prompt=system,
         max_turns=max_turns,
+        # Skip loading user/project/local .claude settings so this run is
+        # reproducible regardless of what's on disk.
+        setting_sources=[],
     )
 
     print(f"Launching agent loop. Output dir: {out_dir}")
