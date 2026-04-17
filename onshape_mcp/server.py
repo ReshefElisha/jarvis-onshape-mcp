@@ -86,7 +86,10 @@ call.
 - delete_document / delete_feature / delete_feature_by_name — cleanup
 
 ### Sketching
-- create_sketch — multi-primitive (rectangles + circles + lines + arcs in one feature)
+- create_sketch — multi-primitive sketch. Two modes:
+  * coordinate-first (no `id` on entities) — hand-compute positions, fast for 1-3 obvious primitives
+  * constraint-first (each entity has an `id`, plus top-level `constraints[]`) — solver-driven, for drawings with tangencies / dimensions / concentricities. 14 constraint types supported.
+- edit_sketch — iterate on an existing sketch. addEntities/addConstraints/removeIds; cascade-removes constraints that reference a removed entity, reports cascaded_removals structurally.
 - create_sketch_rectangle / _rounded_rectangle_sketch — single rect fast path
 - create_sketch_circle / _line / _arc — single primitives
 
@@ -145,6 +148,7 @@ list_entities, or from create_offset_plane).
 - Variable Studios are separate elements — `create_variable_studio` first, then `set_variable` / `get_variables` target that element, NOT the Part Studio elementId.
 - Deterministic face/edge IDs are stable across feature edits, but NEW features may remap them — always re-run `list_entities` or `describe_part_studio` after a mutation before referencing picked geometry.
 - First mutating call on a Part Studio typically auto-creates a sketch on a datum; chain a sketch BEFORE attempting a feature that references geometry.
+- Constraint-first `create_sketch`: `HORIZONTAL`/`VERTICAL` work on LINE entities only (on a point, use `DISTANCE(direction=VERTICAL, value="0 mm")` to pin to the horizontal axis). There is NO magic `origin` keyword — add a `{type:"point", id:"origin", at:[0,0]}` entity if you need a sketch-local anchor for parametric resize. Circles/arcs need center+radius SEEDS even when a constraint will drive final values. `POINT_ON` is not a separate type — use `COINCIDENT` with a point sub-ref.
 """
 
 app = Server("onshape-mcp", instructions=_INSTRUCTIONS)
