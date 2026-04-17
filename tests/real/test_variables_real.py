@@ -141,3 +141,55 @@ async def test_variable_drives_sketch_width(client):
             await client.delete(f"/api/v6/documents/{did}")
         except Exception:  # noqa: BLE001
             pass
+
+
+@pytest.mark.asyncio
+async def test_set_variable_upserts_by_name(client):
+    """set_variable must be upsert-by-name, not wholesale replace.
+
+    Regression for the parametric-reparametrize dogfood bug: the underlying
+    Onshape /variables POST endpoint replaces the VS's entire contents with
+    the posted list, so naive single-var writes silently drop every other
+    variable. Downstream `#name` references in sketches then resolve to
+    nothing and Onshape returns `featureStatus: WARNING` with no message.
+
+    Asserts: after set A=1, set B=2, set C=3 (three separate set_variable
+    calls), the VS contains all three. Pre-fix, only `C` would remain.
+    """
+    vars_mgr = VariableManager(client)
+    docs = DocumentManager(client)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+    doc = await docs.create_document(name=f"dyna-mcp upsert test {ts}")
+    did = doc.id
+    try:
+        wid = (await docs.get_workspaces(did))[0].id
+        vs_eid = await vars_mgr.create_variable_studio(did, wid, name="VS")
+
+        await vars_mgr.set_variable(did, wid, vs_eid, "alpha", "10 mm")
+        await vars_mgr.set_variable(did, wid, vs_eid, "beta", "20 mm")
+        await vars_mgr.set_variable(did, wid, vs_eid, "gamma", "30 mm")
+
+        got = await vars_mgr.get_variables(did, wid, vs_eid)
+        by_name = {v.name: v.expression for v in got}
+        assert by_name == {
+            "alpha": "10 mm",
+            "beta": "20 mm",
+            "gamma": "30 mm",
+        }, f"upsert should preserve all three variables, got {by_name!r}"
+
+        # Updating an existing variable should keep the rest intact.
+        await vars_mgr.set_variable(did, wid, vs_eid, "alpha", "15 mm")
+        got = await vars_mgr.get_variables(did, wid, vs_eid)
+        by_name = {v.name: v.expression for v in got}
+        assert by_name == {
+            "alpha": "15 mm",
+            "beta": "20 mm",
+            "gamma": "30 mm",
+        }, f"updating alpha shouldn't drop beta/gamma, got {by_name!r}"
+
+    finally:
+        try:
+            await client.delete(f"/api/v6/documents/{did}")
+        except Exception:  # noqa: BLE001
+            pass

@@ -21,7 +21,10 @@ Probe details: scratchpad/variables-probe-2.md.
 """
 
 from typing import Any, Dict, List, Literal, Optional
+
+from loguru import logger
 from pydantic import BaseModel
+
 from .client import OnshapeClient
 
 
@@ -98,12 +101,26 @@ class VariableManager:
         workspace_id: str,
         variable_studio_element_id: str,
         variables: List[Dict[str, Any]],
+        *,
+        replace_all: bool = False,
     ) -> Dict[str, Any]:
-        """Write a batch of variables to a Variable Studio. Replaces any
-        existing variables with the same name.
+        """Upsert a batch of variables in a Variable Studio by name.
 
         Each entry: `{"name", "type", "expression", "description"?}`. `type`
         defaults to "LENGTH" if absent (most common in CAD).
+
+        The underlying Onshape endpoint (`POST /api/v6/variables/.../variables`)
+        REPLACES the Variable Studio's entire contents with the posted list.
+        Naive usage loses every variable not included in the current call --
+        which silently broke downstream `#name` references in sketches and
+        surfaced as `featureStatus: WARNING` with no actionable message
+        (flagged by the parametric-reparametrize dogfood).
+
+        So this helper now GETs the current VS state, merges the incoming
+        `variables` in by name (callers win for existing names), and POSTs
+        the union. That gives callers upsert semantics without having to
+        track the VS state themselves. Pass `replace_all=True` if you
+        genuinely want the legacy wholesale-replace.
         """
         if not variables:
             raise ValueError("variables list must not be empty")
@@ -112,8 +129,8 @@ class VariableManager:
             f"/api/v6/variables/d/{document_id}/w/{workspace_id}"
             f"/e/{variable_studio_element_id}/variables"
         )
-        body: List[Dict[str, Any]] = []
-        for v in variables:
+
+        def _to_entry(v: Dict[str, Any]) -> Dict[str, Any]:
             name = v.get("name")
             expression = v.get("expression")
             if not name or not expression:
@@ -121,13 +138,37 @@ class VariableManager:
             entry: Dict[str, Any] = {
                 "name": name,
                 "expression": expression,
-                "type": v.get("type", "LENGTH"),
+                "type": v.get("type") or "LENGTH",
             }
             description = v.get("description")
             if description:
                 entry["description"] = description
-            body.append(entry)
+            return entry
 
+        incoming = [_to_entry(v) for v in variables]
+        by_name: Dict[str, Dict[str, Any]] = {e["name"]: e for e in incoming}
+
+        if not replace_all:
+            # Fetch current VS contents and seed with anything we aren't
+            # touching in this call. Best-effort: a GET failure falls through
+            # to the caller's list, matching the legacy replace behavior.
+            try:
+                existing = await self.client.get(path)
+                for wrapper in existing or []:
+                    if not isinstance(wrapper, dict):
+                        continue
+                    for row in wrapper.get("variables") or []:
+                        row_name = row.get("name")
+                        if not row_name or row_name in by_name:
+                            continue
+                        by_name[row_name] = _to_entry(row)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "set_variables: could not fetch existing VS contents; "
+                    "proceeding with caller's list only (legacy replace)"
+                )
+
+        body = list(by_name.values())
         return await self.client.post(path, data=body)
 
     async def set_variable(
