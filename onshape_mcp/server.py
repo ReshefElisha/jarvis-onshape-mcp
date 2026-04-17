@@ -1712,6 +1712,7 @@ def _feature_apply_json(
     *,
     tool_name: Optional[str] = None,
     warnings: Optional[list[str]] = None,
+    notes: Optional[list[str]] = None,
 ) -> str:
     """Serialize a FeatureApplyResult as the structured JSON the MCP tool returns.
 
@@ -1719,8 +1720,14 @@ def _feature_apply_json(
     helper so the downstream LLM sees one consistent shape. Fields mirror the
     helper's result model; `raw` is omitted so the Onshape feature-state dump
     doesn't balloon the context window. `tool_name` is included so the LLM can
-    tell which call produced a given record when logs get interleaved. `warnings`
-    is only emitted when non-empty so existing callers see a stable shape.
+    tell which call produced a given record when logs get interleaved.
+
+    `warnings` is for misuse signals the caller should heed (e.g. "you passed
+    both plane and faceId; using faceId"). `notes` is for informational
+    bookkeeping where the tool made a judgment call on the caller's behalf
+    (e.g. "auto-set oppositeDirection=true because this REMOVE extrude is
+    sketched on a picked face"). Both are only emitted when non-empty so
+    existing callers see a stable shape.
     """
     payload: dict[str, Any] = {
         "ok": result.ok,
@@ -1734,7 +1741,55 @@ def _feature_apply_json(
         payload["tool"] = tool_name
     if warnings:
         payload["warnings"] = list(warnings)
+    if notes:
+        payload["notes"] = list(notes)
     return json.dumps(payload, indent=2)
+
+
+# Standard datum plane deterministic ids. Anything else in a sketch's
+# `sketchPlane` parameter signals the sketch was placed on a picked face.
+_STANDARD_PLANE_IDS = frozenset({"JCC", "JDC", "JEC"})
+
+
+async def _sketch_is_on_face(
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    sketch_feature_id: str,
+) -> bool:
+    """Return True if the named sketch was placed on a picked face (vs a
+    standard Front/Top/Right plane).
+
+    Walks the sketch feature's `sketchPlane` parameter and checks whether the
+    referenced deterministic id matches a default plane (JCC/JDC/JEC) or
+    something else. Returns False on any lookup or shape error so callers
+    fall back to legacy behavior rather than crash.
+    """
+    try:
+        feats = await partstudio_manager.get_features(
+            document_id, workspace_id, element_id
+        )
+        sketch = next(
+            (
+                f for f in feats.get("features", []) or []
+                if f.get("featureId") == sketch_feature_id
+            ),
+            None,
+        )
+        if not sketch:
+            return False
+        for p in sketch.get("parameters", []) or []:
+            if p.get("parameterId") != "sketchPlane":
+                continue
+            queries = p.get("queries") or []
+            for q in queries:
+                ids = q.get("deterministicIds") or []
+                for ent_id in ids:
+                    if ent_id and ent_id not in _STANDARD_PLANE_IDS:
+                        return True
+        return False
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def _resolve_sketch_plane_id(
@@ -1997,11 +2052,35 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                     ),
                     tool_name=name,
                 ))]
-            # Smart default: if this is a REMOVE extrude on a face (faceId context
-            # unknown here, but REMOVE + default direction cuts AWAY from the
-            # sketch, which is almost never what the user wants on a top-facing
-            # face) -- let the caller override via oppositeDirection.
+            # Smart default for the silent-no-op trap (dogfooder #7): a REMOVE
+            # extrude on a sketch placed on a picked face cuts AWAY from the
+            # face by default, which means cutting into air -- Onshape returns
+            # `INFO: nothing to cut`, helper reports ok=true, Claude moves on
+            # unaware. When `oppositeDirection` isn't passed explicitly AND
+            # the operation is REMOVE AND the sketch lives on a picked face,
+            # default to True so the cut goes INTO material. Surface a `notes`
+            # entry in the response so callers see what got auto-decided.
+            opp_explicit = "oppositeDirection" in arguments
+            notes: list[str] = []
             opp = bool(arguments.get("oppositeDirection", False))
+            if not opp_explicit and op_type == ExtrudeType.REMOVE:
+                on_face = await _sketch_is_on_face(
+                    arguments["documentId"],
+                    arguments["workspaceId"],
+                    arguments["elementId"],
+                    arguments["sketchFeatureId"],
+                )
+                if on_face:
+                    opp = True
+                    notes.append(
+                        "auto-set oppositeDirection=true because this REMOVE "
+                        "extrude is sketched on a picked face -- cutting INTO "
+                        "the material, not out into air. Pass "
+                        "`oppositeDirection: false` explicitly if you wanted "
+                        "to extrude away from the face (e.g. cutting through "
+                        "from underneath)."
+                    )
+
             extrude = ExtrudeBuilder(
                 name=arguments.get("name", "Extrude"),
                 sketch_feature_id=arguments["sketchFeatureId"],
@@ -2018,7 +2097,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["elementId"],
                 extrude.build(),
             )
-            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+            return [TextContent(type="text", text=_feature_apply_json(
+                result, tool_name=name, notes=notes,
+            ))]
         except httpx.HTTPStatusError as e:
             logger.error(f"API error creating extrude: {e.response.status_code} - {e.response.text[:500]}")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
