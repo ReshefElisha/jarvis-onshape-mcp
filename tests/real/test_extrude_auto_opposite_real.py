@@ -18,10 +18,9 @@ Two tests:
        Auto-flip note must NOT appear; body must NOT have a new
        cylinder (cut went the other way and removed nothing).
 
-Each test creates its own OnshapeClient inline rather than via a shared
-fixture -- two async tests sharing an `async with` fixture tickled an
-"Event loop is closed" race when pytest-asyncio recycled the loop
-between tests.
+Each test creates its own OnshapeClient inline. The shared loop-scope
+hazard (server.client._client cached across pytest-asyncio loops) is
+handled by the autouse fixture in tests/real/conftest.py.
 """
 
 from __future__ import annotations
@@ -98,22 +97,16 @@ async def _build_plate_with_top_face(client, call_tool, *, doc_name: str):
     return did, wid, eid, top_face["id"]
 
 
-def _reset_server_singleton():
-    """server.py creates a module-level OnshapeClient at import; its lazily-
-    created httpx client binds to the first event loop that uses it. Across
-    pytest-asyncio tests that loop closes, leaving a stale `_client` that
-    raises "Event loop is closed". Reset it so call_tool re-creates one in
-    the current loop.
-    """
-    import onshape_mcp.server as srv  # noqa: PLC0415
-    srv.client._client = None
+# NB: tests/real/conftest.py provides an autouse fixture that resets
+# `onshape_mcp.server.client._client = None` between tests, so multiple
+# `call_tool`-driven tests in this file don't trip "Event loop is closed"
+# from the module-level singleton being bound to a previous loop.
 
 
 @pytest.mark.asyncio
 async def test_remove_on_face_auto_flips_oppositeDirection():
     """REMOVE extrude on a picked face with NO explicit oppositeDirection
     should auto-flip the cut into the material."""
-    _reset_server_singleton()
     from onshape_mcp.server import call_tool
 
     async with OnshapeClient(_creds()) as client:
@@ -180,7 +173,6 @@ async def test_explicit_oppositeDirection_false_overrides_auto_flip():
     explicitly on REMOVE+face and the cut goes the other way (away from the
     material). Assert the body has NO new cylinder, proving we did NOT cut
     into material -- the explicit override was honored."""
-    _reset_server_singleton()
     from onshape_mcp.server import call_tool
 
     async with OnshapeClient(_creds()) as client:
