@@ -142,6 +142,59 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="create_rounded_rectangle_sketch",
+            description=(
+                "Create a rounded rectangle sketch (4 lines + 4 tangent corner "
+                "arcs) in ONE feature. Use instead of hand-rolling 4 lines + 4 "
+                "arcs with the per-primitive tools -- fewer turns and no "
+                "radians/degrees mistakes. Sketch location: pass either "
+                "`plane` (Front/Top/Right) or `faceId` (from `list_entities`). "
+                "`faceId` wins when both are given. `cornerRadius` must be > 0 "
+                "and no more than half the short side of the bounding rect "
+                "(otherwise there'd be no straight segments left)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "name": {"type": "string", "description": "Sketch name", "default": "Sketch"},
+                    "plane": {
+                        "type": "string",
+                        "enum": ["Front", "Top", "Right"],
+                        "description": "Standard datum plane. Defaults to Front if neither plane nor faceId is given.",
+                    },
+                    "faceId": {
+                        "type": "string",
+                        "description": "Deterministic ID of an existing face (from `list_entities`). Mutually exclusive with `plane`; wins if both given.",
+                    },
+                    "corner1": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "First corner of the bounding rect [x, y]. Bare numbers are mm; use \"10 mm\" / \"0.5 in\" for explicit units.",
+                    },
+                    "corner2": {
+                        "type": "array",
+                        "items": {"type": ["number", "string"]},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Opposite corner of the bounding rect [x, y]. Same convention as corner1.",
+                    },
+                    "cornerRadius": {
+                        "type": ["number", "string"],
+                        "description": "Fillet radius at each corner. Bare numbers are mm; use explicit units for in/cm/m.",
+                    },
+                },
+                "required": [
+                    "documentId", "workspaceId", "elementId",
+                    "corner1", "corner2", "cornerRadius",
+                ],
+            },
+        ),
+        Tool(
             name="create_extrude",
             description="Create an extrude feature from a sketch",
             inputSchema={
@@ -958,10 +1011,11 @@ async def list_tools() -> list[Tool]:
                 "(from `list_entities`). `faceId` wins when both are given.\n\n"
                 "`entities` is an array of mixed primitives. Each item carries a "
                 "`type` discriminator and the type-specific args:\n"
-                "  rectangle: {type, corner1:[x,y], corner2:[x,y], variableWidth?, variableHeight?}\n"
-                "  circle:    {type, center:[x,y], radius, variableRadius?, variableCenter?:[xv,yv]}\n"
-                "  line:      {type, start:[x,y], end:[x,y]}\n"
-                "  arc:       {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
+                "  rectangle:         {type, corner1:[x,y], corner2:[x,y], variableWidth?, variableHeight?}\n"
+                "  rounded_rectangle: {type, corner1:[x,y], corner2:[x,y], cornerRadius}\n"
+                "  circle:            {type, center:[x,y], radius, variableRadius?, variableCenter?:[xv,yv]}\n"
+                "  line:              {type, start:[x,y], end:[x,y]}\n"
+                "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
                 "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" for "
                 "explicit units."
             ),
@@ -990,7 +1044,7 @@ async def list_tools() -> list[Tool]:
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "enum": ["rectangle", "circle", "line", "arc"],
+                                    "enum": ["rectangle", "rounded_rectangle", "circle", "line", "arc"],
                                 },
                             },
                             "required": ["type"],
@@ -2093,6 +2147,31 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating sketch rectangle")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "create_rounded_rectangle_sketch":
+        try:
+            plane_id, plane, warnings = await _resolve_sketch_plane_id(arguments)
+            sketch = SketchBuilder(
+                name=arguments.get("name", "Sketch"), plane=plane, plane_id=plane_id
+            )
+            sketch.add_rounded_rectangle(
+                corner1=tuple(arguments["corner1"]),
+                corner2=tuple(arguments["corner2"]),
+                corner_radius=arguments["cornerRadius"],
+            )
+            result = await apply_feature_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                sketch.build(),
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name, warnings=warnings))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error creating rounded rectangle sketch")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_extrude":
@@ -3274,6 +3353,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                         variable_width=ent.get("variableWidth"),
                         variable_height=ent.get("variableHeight"),
                     )
+                elif etype == "rounded_rectangle":
+                    sketch.add_rounded_rectangle(
+                        corner1=tuple(ent["corner1"]),
+                        corner2=tuple(ent["corner2"]),
+                        corner_radius=ent["cornerRadius"],
+                    )
                 elif etype == "circle":
                     var_center = ent.get("variableCenter")
                     var_center_tuple = (
@@ -3309,7 +3394,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                     )
                 else:
                     raise ValueError(
-                        f"entities[{i}].type must be rectangle | circle | line | arc, "
+                        f"entities[{i}].type must be rectangle | rounded_rectangle | circle | line | arc, "
                         f"got {ent.get('type')!r}"
                     )
 

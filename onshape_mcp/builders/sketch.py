@@ -369,6 +369,198 @@ class SketchBuilder:
 
         return self
 
+    def add_rounded_rectangle(
+        self,
+        corner1: Tuple[LengthLike, LengthLike],
+        corner2: Tuple[LengthLike, LengthLike],
+        corner_radius: LengthLike,
+    ) -> "SketchBuilder":
+        """Add a rounded rectangle: 4 straight sides + 4 tangent corner arcs.
+
+        The bounding box is defined by the two opposite corners; `corner_radius`
+        is the fillet radius at each of the four corners. Straight segments
+        connect consecutive arcs end-to-end, so the closed profile is a valid
+        sketch region ready for extrude / cut-extrude.
+
+        Minimum viable constraint set:
+            - HORIZONTAL on the bottom straight segment (pins orientation)
+            - COINCIDENT at each of the 8 line/arc junction points
+
+        That's enough for a clean regen; Onshape treats the geometry as exact
+        and doesn't need tangency constraints when the initial placement is
+        geometrically tangent. Add-feature-and-check gives OK on the regen.
+
+        Args:
+            corner1: First corner `(x, y)` of the bounding rectangle; each
+                component is a number (mm default) or a string with explicit
+                units ("10 mm", "0.5 in").
+            corner2: Opposite corner `(x, y)`, same convention.
+            corner_radius: Fillet radius at each corner, same convention.
+
+        Returns:
+            Self for chaining.
+        """
+        x1, y1 = corner1
+        x2, y2 = corner2
+        x1_m, y1_m = _to_meters(x1), _to_meters(y1)
+        x2_m, y2_m = _to_meters(x2), _to_meters(y2)
+        r_m = _to_meters(corner_radius)
+
+        # Normalize so (xlo, ylo) is lower-left regardless of caller ordering.
+        xlo, xhi = (x1_m, x2_m) if x2_m > x1_m else (x2_m, x1_m)
+        ylo, yhi = (y1_m, y2_m) if y2_m > y1_m else (y2_m, y1_m)
+
+        # Sanity check the radius -- a corner radius larger than half the
+        # short edge would make the "straight" sides zero-length or negative.
+        short_side = min(xhi - xlo, yhi - ylo)
+        if r_m <= 0:
+            raise ValueError(
+                f"corner_radius must be > 0, got {corner_radius!r} -> {r_m}m"
+            )
+        if r_m * 2 > short_side:
+            raise ValueError(
+                f"corner_radius ({r_m*1000:.2f} mm) exceeds half the short side "
+                f"({short_side*1000/2:.2f} mm); would leave negative straight "
+                f"segments. Either shrink the radius or use a plain rectangle."
+            )
+
+        rrect_id = self._generate_entity_id("rrect")
+        bottom_id = f"{rrect_id}.bottom"
+        right_id = f"{rrect_id}.right"
+        top_id = f"{rrect_id}.top"
+        left_id = f"{rrect_id}.left"
+        arc_br = f"{rrect_id}.arc_br"
+        arc_tr = f"{rrect_id}.arc_tr"
+        arc_tl = f"{rrect_id}.arc_tl"
+        arc_bl = f"{rrect_id}.arc_bl"
+
+        # Four straight segments, each shortened by r on both ends.
+        # Point-id convention matches add_rectangle for familiarity:
+        #   <segment>.start, <segment>.end
+        self.entities.append({
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": bottom_id,
+            "startPointId": f"{bottom_id}.start",
+            "endPointId": f"{bottom_id}.end",
+            "startParam": 0.0,
+            "endParam": (xhi - xlo) - 2 * r_m,
+            "geometry": {
+                "btType": "BTCurveGeometryLine-117",
+                "pntX": xlo + r_m, "pntY": ylo,
+                "dirX": 1.0, "dirY": 0.0,
+            },
+            "isConstruction": False,
+        })
+        self.entities.append({
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": right_id,
+            "startPointId": f"{right_id}.start",
+            "endPointId": f"{right_id}.end",
+            "startParam": 0.0,
+            "endParam": (yhi - ylo) - 2 * r_m,
+            "geometry": {
+                "btType": "BTCurveGeometryLine-117",
+                "pntX": xhi, "pntY": ylo + r_m,
+                "dirX": 0.0, "dirY": 1.0,
+            },
+            "isConstruction": False,
+        })
+        self.entities.append({
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": top_id,
+            "startPointId": f"{top_id}.start",
+            "endPointId": f"{top_id}.end",
+            "startParam": 0.0,
+            "endParam": (xhi - xlo) - 2 * r_m,
+            "geometry": {
+                "btType": "BTCurveGeometryLine-117",
+                "pntX": xhi - r_m, "pntY": yhi,
+                "dirX": -1.0, "dirY": 0.0,
+            },
+            "isConstruction": False,
+        })
+        self.entities.append({
+            "btType": "BTMSketchCurveSegment-155",
+            "entityId": left_id,
+            "startPointId": f"{left_id}.start",
+            "endPointId": f"{left_id}.end",
+            "startParam": 0.0,
+            "endParam": (yhi - ylo) - 2 * r_m,
+            "geometry": {
+                "btType": "BTCurveGeometryLine-117",
+                "pntX": xlo, "pntY": yhi - r_m,
+                "dirX": 0.0, "dirY": -1.0,
+            },
+            "isConstruction": False,
+        })
+
+        # Four corner arcs, each 90 degrees CCW, reference angle from +X.
+        #   bottom-right: 270 -> 360 deg (3pi/2 .. 2pi)
+        #   top-right:      0 ->  90 deg (0     .. pi/2)
+        #   top-left:      90 -> 180 deg (pi/2  .. pi)
+        #   bottom-left:  180 -> 270 deg (pi    .. 3pi/2)
+        arcs = [
+            (arc_br, xhi - r_m, ylo + r_m, 3 * math.pi / 2, 2 * math.pi),
+            (arc_tr, xhi - r_m, yhi - r_m, 0.0,             math.pi / 2),
+            (arc_tl, xlo + r_m, yhi - r_m, math.pi / 2,     math.pi),
+            (arc_bl, xlo + r_m, ylo + r_m, math.pi,         3 * math.pi / 2),
+        ]
+        for arc_eid, cx, cy, t0, t1 in arcs:
+            self.entities.append({
+                "btType": "BTMSketchCurveSegment-155",
+                "entityId": arc_eid,
+                "startPointId": f"{arc_eid}.start",
+                "endPointId": f"{arc_eid}.end",
+                "centerId": f"{arc_eid}.center",
+                "startParam": t0,
+                "endParam": t1,
+                "geometry": {
+                    "btType": "BTCurveGeometryCircle-115",
+                    "radius": r_m,
+                    "xCenter": cx, "yCenter": cy,
+                    "xDir": 1.0, "yDir": 0.0,
+                    "clockwise": False,
+                },
+                "isConstruction": False,
+            })
+
+        # Join the 8 endpoints with COINCIDENT constraints, walking the closed
+        # profile CCW: bottom -> arc_br -> right -> arc_tr -> top -> arc_tl ->
+        # left -> arc_bl -> back to bottom.
+        pairs = [
+            (f"{bottom_id}.end",   f"{arc_br}.start"),
+            (f"{arc_br}.end",      f"{right_id}.start"),
+            (f"{right_id}.end",    f"{arc_tr}.start"),
+            (f"{arc_tr}.end",      f"{top_id}.start"),
+            (f"{top_id}.end",      f"{arc_tl}.start"),
+            (f"{arc_tl}.end",      f"{left_id}.start"),
+            (f"{left_id}.end",     f"{arc_bl}.start"),
+            (f"{arc_bl}.end",      f"{bottom_id}.start"),
+        ]
+        for i, (pt_a, pt_b) in enumerate(pairs):
+            self.constraints.append({
+                "btType": "BTMSketchConstraint-2",
+                "constraintType": "COINCIDENT",
+                "entityId": f"{rrect_id}.join{i}",
+                "parameters": [
+                    {"btType": "BTMParameterString-149", "value": pt_a, "parameterId": "localFirst"},
+                    {"btType": "BTMParameterString-149", "value": pt_b, "parameterId": "localSecond"},
+                ],
+            })
+
+        # HORIZONTAL on the bottom edge pins the orientation so the solver
+        # doesn't rotate the whole profile.
+        self.constraints.append({
+            "btType": "BTMSketchConstraint-2",
+            "constraintType": "HORIZONTAL",
+            "entityId": f"{rrect_id}.horizontal",
+            "parameters": [
+                {"btType": "BTMParameterString-149", "value": bottom_id, "parameterId": "localFirst"},
+            ],
+        })
+
+        return self
+
     def add_circle(
         self,
         center: Tuple[LengthLike, LengthLike],
