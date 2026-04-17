@@ -65,8 +65,89 @@ logger.add(
 )
 
 
-# Initialize server
-app = Server("onshape-mcp")
+# Initialize server. The `instructions` block loads into every client
+# session (alongside SKILL.md if the user also wires that in), giving
+# Claude a categorized tool index + gotchas up front so the first 10
+# turns aren't spent guessing tool names.
+_INSTRUCTIONS = """\
+Onshape MCP — drive real CAD. Tools are lazy-loaded (fetch schemas via
+ToolSearch before calling). Use `describe_part_studio` as your verification
+loop after every mutation — it returns topology + multi-view renders in one
+call.
+
+## Tool index
+
+### Documents
+- create_document — new doc. Returns (document_id, workspace_id, part_studio_id) in ONE call.
+- get_document_summary / get_document — structure and metadata
+- list_documents / search_documents — find existing
+- get_elements / find_part_studios / get_parts — enumerate within a workspace
+- create_part_studio / create_assembly — new elements inside a doc
+- delete_document / delete_feature / delete_feature_by_name — cleanup
+
+### Sketching
+- create_sketch — multi-primitive (rectangles + circles + lines + arcs in one feature)
+- create_sketch_rectangle / _rounded_rectangle_sketch — single rect fast path
+- create_sketch_circle / _line / _arc — single primitives
+
+All sketches accept either `plane` (Front/Top/Right) OR `faceId` (from
+list_entities, or from create_offset_plane).
+
+### Features (Part Studio)
+- create_extrude — BLIND or SYMMETRIC; NEW / ADD / REMOVE / INTERSECT
+- create_revolve / create_thicken
+- create_fillet / create_chamfer
+- create_shell — hollow a body; pass faceIds to remove; inward by default (bbox preserved)
+- create_offset_plane — signed offset from a datum (Front/Top/Right) or a face; pass feature_id as faceId into any sketch primitive
+- create_boolean — union / subtract / intersect existing bodies
+- create_linear_pattern / create_circular_pattern
+- write_featurescript_feature — escape hatch: threads, helices, sweeps, lofts, anything not primitive. Takes a complete FS source file.
+- update_feature — patch params on an existing feature (iteration)
+
+### Introspection (USE OFTEN)
+- describe_part_studio — topology + multi-view renders in one call. First stop after every mutation.
+- list_entities — faces/edges/vertices with filters: outward_axis, at_z_mm, geometryType, radius_range_mm, length_range_mm
+- get_features / get_body_details — feature tree with statuses, per-part face/edge IDs
+- get_mass_properties / get_bounding_box / measure
+- get_face_coordinate_system — outward-facing coord frame for a face
+
+### Rendering
+- render_part_studio_views / render_assembly_views — named views (iso/top/front/right/left/back/bottom)
+- crop_image — zoom into a rendered image_id for detail
+- list_cached_images — audit cached renders
+
+### Variables (parametric driving)
+- create_variable_studio — variables live in their OWN element, separate from Part Studios
+- set_variable — upsert-by-name; string value like "25 mm" or "0.5 in"
+- get_variables
+
+### Assembly
+- create_assembly / add_assembly_instance
+- create_fastened_mate / _revolute_mate / _cylindrical_mate / _slider_mate / _mate_connector
+- transform_instance / set_instance_position / align_instance_to_face
+- get_assembly / get_assembly_features / get_assembly_positions
+- check_assembly_interference
+- export_assembly / export_part_studio (STL / STEP / GLTF / …)
+
+### FeatureScript
+- eval_featurescript — read-only expression evaluation (for querying geometry)
+- write_featurescript_feature — custom feature authoring; supports `quantity`, `string`, `boolean`, `real` parameter types
+
+## Units and frames
+- Bare numbers in lengths/offsets are MILLIMETERS. Strings like "0.5 in", "15 mm", "0.03 m" are explicit.
+- `Front` is XZ (Y is the normal with sign flip); `Top` is XY; `Right` is YZ. `list_entities` reports outward_axis in world frame.
+
+## Gotchas (read these before your first build)
+- `create_extrude` with `operationType=REMOVE` on a picked face: the auto-flip heuristic keys off the geometric `normal`, not `outward_normal`. On shelled / hollowed faces they disagree — if a REMOVE returns 0 volume, re-sketch on a standard datum with explicit `depth` instead of a face sketch.
+- Onshape has no section-view REST endpoint — only the UI's Shift+X makes them. Use `render_part_studio_views` with multiple named views instead.
+- `write_featurescript_feature` with `opExtrude(operationType: ADD)` does NOT union with existing bodies — you need `opBoolean(UNION)` in the FS. The native `create_extrude` tool DOES union correctly (it goes through the public feature API, not the op-level FS layer).
+- `create_shell` thickness is a positive length; direction is governed by `outward` (default false = inward). No sign gotcha here; the `opShell` sign-flip gotcha only applies when you write FS yourself.
+- Variable Studios are separate elements — `create_variable_studio` first, then `set_variable` / `get_variables` target that element, NOT the Part Studio elementId.
+- Deterministic face/edge IDs are stable across feature edits, but NEW features may remap them — always re-run `list_entities` or `describe_part_studio` after a mutation before referencing picked geometry.
+- First mutating call on a Part Studio typically auto-creates a sketch on a datum; chain a sketch BEFORE attempting a feature that references geometry.
+"""
+
+app = Server("onshape-mcp", instructions=_INSTRUCTIONS)
 
 # Initialize Onshape client. Accept both naming conventions: upstream uses
 # ONSHAPE_ACCESS_KEY/SECRET_KEY, Onshape's developer portal examples use
