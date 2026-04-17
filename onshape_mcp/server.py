@@ -1160,6 +1160,70 @@ async def list_tools() -> list[Tool]:
                 "required": ["documentId", "workspaceId", "elementId", "entities"],
             },
         ),
+        Tool(
+            name="edit_sketch",
+            description=(
+                "Iterate on an existing sketch without rebuilding it. Pass any "
+                "of `addEntities`, `addConstraints`, `removeIds` and the server "
+                "fetches the current BTMSketch-151, splices the lists, and "
+                "re-POSTs. Use this for the second/third pass on a sketch "
+                "(adding a hole pattern after the outline lands; tightening a "
+                "constraint after a regen check) instead of delete+recreate.\n\n"
+                "Add semantics are STRICT: every entity/constraint dict must "
+                "carry a non-empty `id` string and ids may not collide with "
+                "anything already on the wire. To retarget an id, removeIds "
+                "it first and then addEntities it back.\n\n"
+                "removeIds is a single bag matched against entity ids AND "
+                "constraint ids. Cascade: any constraint whose `entities`/"
+                "`entity` (or sub-point ref like `line1.start`) names an "
+                "entity in removeIds is auto-dropped and reported back in "
+                "`cascaded_removals` so you see exactly what got pulled."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "sketchFeatureId": {
+                        "type": "string",
+                        "description": "featureId of the sketch to edit (from a prior create_sketch).",
+                    },
+                    "addEntities": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Entity dicts to append. Each must carry a unique "
+                            "`id` plus the type-specific fields the constraint-"
+                            "first sketch surface accepts."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "addConstraints": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Constraint dicts to append. Each must carry a "
+                            "unique `id`. Reference entities by user-supplied "
+                            "`id` (e.g. `\"entities\": [\"line1\", \"circle1\"]`) "
+                            "or sub-points (`\"line1.start\"`)."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "removeIds": {
+                        "type": "array",
+                        "default": [],
+                        "items": {"type": "string"},
+                        "description": (
+                            "User ids to drop. Matches entities AND constraints. "
+                            "Constraints referencing a removed entity cascade "
+                            "out and are reported in cascaded_removals."
+                        ),
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId"],
+            },
+        ),
         # === Feature Tools ===
         Tool(
             name="create_fillet",
@@ -3769,6 +3833,48 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating multi-entity sketch")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "edit_sketch":
+        try:
+            from onshape_mcp.api.sketch_edit import edit_sketch as _edit_sketch
+            result = await _edit_sketch(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["sketchFeatureId"],
+                add_entities=arguments.get("addEntities") or [],
+                add_constraints=arguments.get("addConstraints") or [],
+                remove_ids=arguments.get("removeIds") or [],
+            )
+            apply = result.apply
+            payload = {
+                "ok": apply.ok,
+                "status": apply.status,
+                "feature_id": apply.feature_id,
+                "feature_type": apply.feature_type,
+                "feature_name": apply.feature_name,
+                "error_message": apply.error_message,
+                "added_entity_ids": result.added_entity_ids,
+                "added_constraint_ids": result.added_constraint_ids,
+                "removed_entity_ids": result.removed_entity_ids,
+                "removed_constraint_ids": result.removed_constraint_ids,
+                "cascaded_removals": [
+                    {"constraint_id": c.constraint_id, "referenced": c.referenced}
+                    for c in result.cascaded_removals
+                ],
+                "tool": "edit_sketch",
+            }
+            # Use the standard hint surface so enum-specific advice
+            # (SKETCH_DIMENSION_MISSING_PARAMETER etc.) still fires on
+            # this path.
+            payload["hints"] = _hints_for_result(apply)
+            return [TextContent(type="text", text=json.dumps(payload, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error editing sketch")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fillet":
