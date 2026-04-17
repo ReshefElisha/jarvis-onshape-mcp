@@ -109,6 +109,11 @@ async def run(brief: str, out_dir: Path, *, max_turns: int = 40) -> dict:
         disallowed_tools=[
             "Bash", "Edit", "MultiEdit", "WebFetch", "WebSearch",
             "Task", "NotebookEdit", "KillShell", "BashOutput",
+            # Block any other MCP servers the user has configured in
+            # ~/.claude.json -- their tools leak through despite
+            # setting_sources=[]. Our agent should only talk to onshape.
+            "mcp__claude.ai_*",
+            "mcp__plugin_*",
         ],
         permission_mode="bypassPermissions",
         system_prompt=system,
