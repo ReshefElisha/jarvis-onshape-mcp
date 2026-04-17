@@ -127,10 +127,23 @@ async def test_describe_carries_physical_summary_section():
             assert vol_match and float(vol_match.group(1)) > 1000, (
                 f"expected sensible volume (>1000 mm^3), got {vol_match and vol_match.group(1)}"
             )
-            # bbox may render as dimensions OR as "unknown" depending on
-            # whether the preceding FS evBox3d parse found the corners.
-            # The section's presence is what we care about.
-            assert re.search(r"bbox: ([\d.]+ x [\d.]+ x [\d.]+ mm|unknown)", ps_block), ps_block
+            # bbox MUST render as dimensions on a healthy body (was relaxed
+            # to also accept "unknown" while the FS evBox3d parser was
+            # walking the wrong response key; fixed in [describe-bbox-fix]).
+            # Plate is 60x40x14 (boss adds 6 to the 8 mm plate height).
+            bbox_match = re.search(
+                r"bbox: ([\d.]+) x ([\d.]+) x ([\d.]+) mm", ps_block
+            )
+            assert bbox_match, (
+                f"bbox should be reported as dimensions on a healthy body, "
+                f"got {ps_block!r}"
+            )
+            dims = sorted(float(bbox_match.group(i)) for i in (1, 2, 3))
+            # Plate footprint dominates: longest side 60, mid 40, height 14
+            # (8 mm plate + 6 mm boss). Allow a tight tolerance.
+            assert abs(dims[2] - 60.0) < 0.5, f"longest dim should be ~60mm: {dims}"
+            assert abs(dims[1] - 40.0) < 0.5, f"mid dim should be ~40mm: {dims}"
+            assert abs(dims[0] - 14.0) < 0.5, f"shortest dim should be ~14mm: {dims}"
 
             # Face + edge type breakdowns appear. The final body should have
             # PLANE and CYLINDER faces at minimum; 1 body has both plate

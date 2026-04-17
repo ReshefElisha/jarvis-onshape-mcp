@@ -389,18 +389,7 @@ class DescribeManager:
         rendered = _safe(rendered, "render") or []
         face_areas = _safe(face_areas, "face_areas") or {}
 
-        # Pull bbox out of the FS evBox3d response; it's nested under "result".
-        bbox = None
-        if bbox_raw:
-            result = bbox_raw.get("result") or {}
-            msg = result.get("message") if isinstance(result, dict) else None
-            if msg and msg.get("value"):
-                vals = msg["value"]
-                # FS returns value as a dict with "minCorner" and "maxCorner".
-                mc = _extract_fs_vector(vals.get("minCorner"))
-                xc = _extract_fs_vector(vals.get("maxCorner"))
-                if mc and xc:
-                    bbox = {"minCorner": mc, "maxCorner": xc}
+        bbox = _parse_bbox_response(bbox_raw)
 
         sections = [
             _feature_tree_text(features_raw),
@@ -444,6 +433,50 @@ class DescribeManager:
             logger.debug(f"face-area FS probe failed: {e}")
             return {}
         return _parse_fs_area_map(resp)
+
+
+def _parse_bbox_response(
+    bbox_raw: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Dict[str, float]]]:
+    """Pull `{minCorner, maxCorner}` out of the FS evBox3d eval response.
+
+    Probed shape (2026-04-17 against FS 2931):
+        result: {btType: BTFSValueMap, typeTag: "Box3d", value: [
+            {btType: BTFSValueMapEntry-2077,
+             key:   {btType: BTFSValueString, value: "maxCorner"},
+             value: {btType: BTFSValueArray, typeTag: "Vector",
+                     value: [<3x BTFSValueWithUnits>]}},
+            {... key.value == "minCorner" ...}
+        ]}
+
+    The earlier parser looked for `result.message.value` (no such key) and
+    treated `value` as a dict keyed by corner name. The actual `value` is a
+    LIST of BTFSValueMapEntry-2077 entries; you have to walk and match by
+    `entry.key.value`. That mismatch is why every healthy body printed
+    "bbox: unknown" in describe output.
+
+    Returns None when the response is missing/empty/wrong-shaped so callers
+    can fall through to the "unknown" placeholder rather than crashing.
+    """
+    if not isinstance(bbox_raw, dict):
+        return None
+    result = bbox_raw.get("result")
+    entries = result.get("value") if isinstance(result, dict) else None
+    if not isinstance(entries, list):
+        return None
+    corners: Dict[str, Any] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key_obj = entry.get("key") or {}
+        key_name = key_obj.get("value") if isinstance(key_obj, dict) else None
+        if key_name in ("minCorner", "maxCorner"):
+            corners[key_name] = entry.get("value")
+    mc = _extract_fs_vector(corners.get("minCorner"))
+    xc = _extract_fs_vector(corners.get("maxCorner"))
+    if mc and xc:
+        return {"minCorner": mc, "maxCorner": xc}
+    return None
 
 
 def _extract_fs_vector(fs_val: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
