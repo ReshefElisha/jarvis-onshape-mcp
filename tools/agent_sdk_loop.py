@@ -95,6 +95,19 @@ async def run(brief: str, out_dir: Path, *, max_turns: int = 40) -> dict:
     # bypassPermissions, so use disallowed_tools to keep Claude out of
     # Bash / Edit / WebFetch / etc. (It still needs Read/Write to think
     # on paper.)
+    # Propagate Onshape credentials to the MCP subprocess. The project .env
+    # uses the ONSHAPE_API_KEY/SECRET names; the starter's server reads
+    # ONSHAPE_ACCESS_KEY/SECRET_KEY first and falls back to API_KEY/SECRET.
+    # Pass both explicitly so the subprocess doesn't need the shell to have
+    # pre-exported them (lgvhcnlr hit a 401 on first run because of this).
+    mcp_env: dict[str, str] = {}
+    for name in (
+        "ONSHAPE_ACCESS_KEY", "ONSHAPE_SECRET_KEY",
+        "ONSHAPE_API_KEY", "ONSHAPE_API_SECRET",
+    ):
+        if os.getenv(name):
+            mcp_env[name] = os.environ[name]
+
     options = ClaudeAgentOptions(
         mcp_servers={
             "onshape": {
@@ -104,6 +117,7 @@ async def run(brief: str, out_dir: Path, *, max_turns: int = 40) -> dict:
                     "--directory", str(REPO),
                     "run", "onshape-mcp",
                 ],
+                **({"env": mcp_env} if mcp_env else {}),
             }
         },
         disallowed_tools=[
