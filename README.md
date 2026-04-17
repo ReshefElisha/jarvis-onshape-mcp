@@ -67,8 +67,8 @@ regen warnings. If it takes a wrong direction on an extrude, the
 
 ## Protocol guide
 
-`SKILL.md` (shipped in this repo) is the protocol brief Claude reads on every
-session. It covers:
+`skills/onshape/SKILL.md` is auto-discovered by Claude Code as a plugin skill
+and loaded into every session alongside the MCP tools. It covers:
 
 - Units (bare numbers in mm; strings like `"0.5 in"` coerce to meters).
 - Coordinate frames (Front is XZ with sign flip on the Y normal).
