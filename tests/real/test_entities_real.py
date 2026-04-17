@@ -80,6 +80,70 @@ async def test_list_entities_returns_faces_and_edges_with_ids_and_descriptions()
 
 
 @pytest.mark.asyncio
+async def test_outward_axis_distinguishes_top_from_bottom():
+    """Regression for dogfooder bug #2: plane-defining normal is ambiguous
+    between a body's top and bottom face when both share the same plane
+    direction. Picking by `normal_axis == "+Z"` and argmin on `origin[2]`
+    landed on the body's BOTTOM face (plane defining-normal +Z, outward -Z),
+    causing two mounting-hole cuts to silently no-op.
+
+    `outward_axis` is computed from `evFaceTangentPlane` and reflects the
+    body-outward direction. The smoke doc's body is a 50x30x15 mm plate
+    with a blind hole; its top and bottom planar faces both have the same
+    plane normal but opposite outward axes.
+    """
+    ak = os.getenv("ONSHAPE_ACCESS_KEY") or os.getenv("ONSHAPE_API_KEY", "")
+    sk = os.getenv("ONSHAPE_SECRET_KEY") or os.getenv("ONSHAPE_API_SECRET", "")
+    creds = OnshapeCredentials(access_key=ak, secret_key=sk)
+    async with OnshapeClient(creds) as c:
+        em = EntityManager(c)
+        out = await em.list_entities(SMOKE_DOC, SMOKE_WS, SMOKE_PARTSTUDIO)
+
+    body = out["bodies"][0]
+    plane_faces = [f for f in body["faces"] if f["type"] == "PLANE"]
+
+    # Every PLANE face must carry both fields. Outward should be a unit-axis
+    # label (+Z/-Z/etc) for an axis-aligned plate; if the FS round-trip
+    # silently failed the field would be None.
+    for f in plane_faces:
+        assert f["outward_axis"] in {"+X", "-X", "+Y", "-Y", "+Z", "-Z"}, (
+            f"face {f['id']} missing outward_axis: {f}"
+        )
+        assert f["outward_normal"] is not None, f"face {f['id']} missing outward_normal"
+
+    # The plate top sits at z=15 mm; bottom at z=0 mm. Both share plane-defining
+    # normal +Z (same surface orientation). Their outward axes must differ.
+    top_candidates = [
+        f for f in plane_faces
+        if f.get("origin") and abs(f["origin"][2] * 1000 - 15.0) < 0.5
+        and f["normal_axis"] in ("+Z", "-Z")
+    ]
+    bottom_candidates = [
+        f for f in plane_faces
+        if f.get("origin") and abs(f["origin"][2] * 1000 - 0.0) < 0.5
+        and f["normal_axis"] in ("+Z", "-Z")
+    ]
+    assert top_candidates, "missing top +Z face"
+    assert bottom_candidates, "missing bottom +Z face"
+
+    top_outwards = {f["outward_axis"] for f in top_candidates}
+    bottom_outwards = {f["outward_axis"] for f in bottom_candidates}
+    assert top_outwards == {"+Z"}, (
+        f"top face(s) at z=15mm should be outward +Z, got {top_outwards}"
+    )
+    assert bottom_outwards == {"-Z"}, (
+        f"bottom face(s) at z=0mm should be outward -Z (the bug fix), got {bottom_outwards}"
+    )
+
+    # Description should mention the outward direction so an LLM caller
+    # reading the summary picks the right face by eye.
+    bot = bottom_candidates[0]
+    assert "outward -Z" in bot["description"], (
+        f"description should advertise outward direction, got {bot['description']!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_entities_respects_kinds_filter():
     ak = os.getenv("ONSHAPE_ACCESS_KEY") or os.getenv("ONSHAPE_API_KEY", "")
     sk = os.getenv("ONSHAPE_SECRET_KEY") or os.getenv("ONSHAPE_API_SECRET", "")
