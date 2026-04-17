@@ -1465,13 +1465,21 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Enumerate every face, edge, and vertex of every body in a Part Studio "
                 "with deterministic IDs you can drop into subsequent feature payloads. "
-                "Each entity has a human-readable 'description' like 'plane / normal +Z / "
+                "Each entity has a human-readable 'description' like 'plane / outward +Z / "
                 "origin (0.0,0.0,15.0) mm' or 'cylinder / radius 5.00 mm / origin ... mm' "
                 "so you can pick the right one by reading rather than geometric reasoning. "
                 "Call this after ANY feature that creates or modifies bodies, before "
                 "sketching on a face, filleting an edge, mating to a face, or otherwise "
                 "referencing picked geometry. IDs (JHK, JNC, JHl, ...) are the "
-                "'deterministicIds' you put in a BTMIndividualQuery-138 query entry."
+                "'deterministicIds' you put in a BTMIndividualQuery-138 query entry.\n\n"
+                "FILTERS (all optional; prune BEFORE serialization so responses stay small "
+                "on complex parts): `geometry_type` (PLANE/CYLINDER/LINE/ARC/...), "
+                "`outward_axis` (+X/-X/+Y/-Y/+Z/-Z), `at_z_mm` + `at_z_tol_mm` (faces "
+                "pick by origin Z; edges pick by midpoint Z), `radius_range_mm` "
+                "([min,max] mm; cylinders/arcs/circles), `length_range_mm` ([min,max] mm; "
+                "edges only). The response echoes `filters` and reports both "
+                "`original_counts` and `filtered_counts` per body so you can see how much "
+                "pruning happened."
             ),
             inputSchema={
                 "type": "object",
@@ -1488,6 +1496,54 @@ async def list_tools() -> list[Tool]:
                     "bodyIndex": {
                         "type": "integer",
                         "description": "0-based body index to limit output. Omit for all bodies.",
+                    },
+                    "geometryType": {
+                        "type": "string",
+                        "description": (
+                            "Case-insensitive type filter. For faces: PLANE, CYLINDER, "
+                            "CONE, TORUS, SPHERE, B_SURFACE. For edges: LINE, CIRCLE, "
+                            "ARC, B_CURVE. Entities without the named type are pruned."
+                        ),
+                    },
+                    "outwardAxis": {
+                        "type": "string",
+                        "enum": ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
+                        "description": (
+                            "Face filter: keep only faces whose body-outward normal is "
+                            "this world axis. Falls back to `normal_axis` for faces the "
+                            "FS probe couldn't evaluate."
+                        ),
+                    },
+                    "atZmm": {
+                        "type": "number",
+                        "description": (
+                            "Z cut in mm. Keep only faces whose origin Z (planar) is "
+                            "within `atZtolMm` of this value, and edges whose midpoint "
+                            "Z is within tolerance."
+                        ),
+                    },
+                    "atZtolMm": {
+                        "type": "number",
+                        "description": "Tolerance around atZmm in mm; default 0.5.",
+                        "default": 0.5,
+                    },
+                    "radiusRangeMm": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": (
+                            "[min_mm, max_mm] inclusive. Keeps only entities with a "
+                            "radius in range (cylinders/cones/tori for faces; "
+                            "circles/arcs for edges)."
+                        ),
+                    },
+                    "lengthRangeMm": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "description": "Edges only: [min_mm, max_mm] inclusive edge length.",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
@@ -3859,15 +3915,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "list_entities":
         try:
-            import json as _json
             result = await entity_manager.list_entities(
                 document_id=arguments["documentId"],
                 workspace_id=arguments["workspaceId"],
                 element_id=arguments["elementId"],
                 kinds=arguments.get("kinds") or None,
                 body_index=arguments.get("bodyIndex"),
+                geometry_type=arguments.get("geometryType"),
+                outward_axis=arguments.get("outwardAxis"),
+                at_z_mm=arguments.get("atZmm"),
+                at_z_tol_mm=arguments.get("atZtolMm", 0.5),
+                radius_range_mm=arguments.get("radiusRangeMm"),
+                length_range_mm=arguments.get("lengthRangeMm"),
             )
-            return [TextContent(type="text", text=_json.dumps(result, indent=2, default=str))]
+            return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except ValueError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
         except httpx.HTTPStatusError as e:
             return [
                 TextContent(
