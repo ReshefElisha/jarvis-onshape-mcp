@@ -74,3 +74,38 @@ rerun next.
 the loop agent and corrupt the signal. The grader catches agent bugs;
 only human review catches reference bugs. Phase 3's manual-read pass
 is load-bearing.
+
+## 2026-04-18 — grader v4: bbox-center alignment for L4/L5
+
+Instead of tightening brief wording to force position agreement
+(seed_06 "centered on origin" vs seed_08 Y-placement), fixed the grader:
+`boolean_iou` and `chamfer_distance` now translate A so its bbox center
+sits on top of B's before computing. Captures the principle: a brief
+describes a shape, not its world-frame placement — two agents that
+build the same part at different translations should score the same.
+
+Rotation is NOT canceled out — briefs typically specify orientation
+(e.g. "axis along Z"), so a wrong-axis build is still a real failure.
+
+Grader version 3 → 4. GRADER_HASH updated. All prior run artifacts
+regraded in place (`scores.json` rewritten, `mean_composite` in
+scoreboard.jsonl updated, `regraded_with_grader_version: 4` added).
+
+Final baseline picture on easy tier (2 runs, 6 briefs, 1 overlap with
+the invalid first entry):
+
+| run       | brief_set                                         | mean  |
+|-----------|---------------------------------------------------|-------|
+| 177653407 | plate_one_hole, plate_four_holes, washer          | 1.000 |
+| 177654049 | standoff, l_bracket, slotted_strap                | 0.978 |
+
+6/6 easy-tier briefs covered. Only non-1.0 is l_bracket at 0.933
+— topology mismatch (agent: 8 faces, ref: 14 faces — agent's union
+left fewer internal faces). That's a real topology difference,
+picked up by L3 and L5. Not a grader bug.
+
+Noise floor: with only 2 samples we can't compute variance properly,
+but easy-tier baseline is clearly at/near the ceiling. That's what
+Phase 3 was supposed to tell us. **Verdict: easy tier is effectively
+solved by baseline; promote to medium tier before running more
+baseline characterization.**

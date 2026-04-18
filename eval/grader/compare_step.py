@@ -181,12 +181,49 @@ def topology_signature(shape: TopoDS_Shape) -> TopologySignature:
 # --- Boolean IoU -----------------------------------------------------
 
 
-def boolean_iou(a: TopoDS_Shape, b: TopoDS_Shape) -> float:
-    """vol(A ∩ B) / vol(A ∪ B). Returns 0 on degenerate cases."""
+def _translate(shape: TopoDS_Shape, tx: float, ty: float, tz: float) -> TopoDS_Shape:
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Trsf, gp_Vec
+    trsf = gp_Trsf()
+    trsf.SetTranslation(gp_Vec(tx, ty, tz))
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+
+def _bbox_center(shape: TopoDS_Shape) -> Tuple[float, float, float]:
+    b = bbox(shape)
+    return (0.5 * (b.xmin + b.xmax),
+            0.5 * (b.ymin + b.ymax),
+            0.5 * (b.zmin + b.zmax))
+
+
+def align_bbox_centers(a: TopoDS_Shape, b: TopoDS_Shape) -> Tuple[TopoDS_Shape, TopoDS_Shape]:
+    """Translate `a` so its bbox center sits on top of `b`'s.
+
+    Position-invariance: the brief describes a shape, not its world-frame
+    placement. Two agents that build the same part at different translations
+    (e.g. corner-at-origin vs centered-on-origin) should score the same on
+    geometric-similarity layers (L4 IoU, L5 Chamfer). Rotation is NOT canceled
+    out — briefs specify orientation ("axis along Z") and a wrong-axis build
+    is a real failure.
+    """
+    ax, ay, az = _bbox_center(a)
+    bx, by, bz = _bbox_center(b)
+    return _translate(a, bx - ax, by - ay, bz - az), b
+
+
+def boolean_iou(a: TopoDS_Shape, b: TopoDS_Shape, align: bool = True) -> float:
+    """vol(A ∩ B) / vol(A ∪ B). Returns 0 on degenerate cases.
+
+    By default, translates A so its bbox center aligns with B's before
+    computing the boolean. Pass `align=False` to disable (used when the
+    caller has already aligned, or when position disagreement should count).
+    """
     va = volume(a)
     vb = volume(b)
     if va == 0.0 or vb == 0.0:
         return 0.0
+    if align:
+        a, b = align_bbox_centers(a, b)
     try:
         inter = BRepAlgoAPI_Common(a, b).Shape()
         union = BRepAlgoAPI_Fuse(a, b).Shape()
@@ -234,12 +271,18 @@ def chamfer_distance(
     a: TopoDS_Shape,
     b: TopoDS_Shape,
     n_samples: int = 10000,
+    align: bool = True,
 ) -> float:
     """Symmetric Chamfer distance between tessellations of a and b, in meters.
 
     Down-samples each point cloud to `n_samples` for KDTree cost. Returns
     the mean of mean-forward-distance and mean-backward-distance.
+
+    When `align=True` (default) the two shapes' bbox centers are aligned
+    before tessellation — same position-invariance as boolean_iou.
     """
+    if align:
+        a, b = align_bbox_centers(a, b)
     # Use a bbox-diag-fraction deflection so large + small shapes both tess well.
     try:
         diag = max(bbox(a).diagonal, bbox(b).diagonal, 1e-6)
