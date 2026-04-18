@@ -140,3 +140,55 @@ from the render and over-estimated their sizes with no feedback loop.
 to a strict "after every feature that adds/removes volume" and lay out
 what the agent should LOOK at in the output (bbox vs expectation, feature
 count vs plan, new faces vs previous count).
+
+## 2026-04-18 — v002 result + direction change
+
+v002 (grader-awareness + decompose-and-count) on medium tier:
+- ctc_04: 0.15 (same as baseline + v001)
+- ctc_05: 0.28 (v001 had 0.29)
+- ftc_06: 0.13 (baseline 0.15, v001 0.15 — slight REGRESSION)
+- **mean 0.189** vs v001 0.196 → REVERTED
+
+Diagnostics on per-layer scores:
+- **L4 Boolean IoU = 0 on all three briefs, every variant.** Even with
+  bbox-center alignment, the agent's features never occupy the same
+  3D regions as the reference. That's the real ceiling on medium tier.
+  Agent cannot infer exact feature positions from an isometric render.
+- L3 topology went UP on ctc_05 (0.25 → 0.10) — agent built FEWER faces
+  in v002, which is strange given the "count at least N features"
+  instruction. One hypothesis: grader-awareness text talked about
+  "feature count" and agent conflated SKILL "features" (kernel-level
+  faces/edges) with Onshape "features" (sketches+extrudes), and so
+  built fewer Onshape features thinking that's what was being scored.
+- L1 volume improved slightly on ctc_04 (7.9M→9.7M closer to 17.5M ref).
+  Over-build instruction had some bite. Not enough to move composite
+  because L1 contributes only 15% and L4/L5 still zero.
+
+**Direction change:** SKILL.md-level mutations on prompt content are
+hitting a ceiling because the bottleneck is positional/geometric
+interpretation of the render, not feature-count awareness. The agent
+already knows "more features = better" from v002's text and still
+can't place them.
+
+**Next mutation candidates (pick one):**
+1. Push `crop_image` hard: force per-region inspection before placing
+   each feature. Tell the agent to crop the render to a quadrant, count
+   features in that quadrant, then place them with coordinates read
+   from the cropped view.
+2. Reference-render-after-each-feature loop: `render_part_studio_views`
+   after every feature, call crop_image on matching regions of the
+   reference, visually compare.
+3. Widen mutation scope to server.py's _INSTRUCTIONS block (Phase 5+).
+   Not yet — haven't plateaued on SKILL.md.
+
+Leaning toward #2. The failure is *feedback*, not *planning*. Cost: more
+turns per brief (already at 60-95/100). Might need to raise cap to 150.
+
+Scoreboard:
+  baseline (medium)       : 0.155
+  v001-plan-from-render   : 0.196  KEPT (tentative, no noise floor)
+  v002-grader-aware-count : 0.189  REVERTED
+
+**Still need: medium-tier noise floor.** n=1 samples of each variant.
+With only 3 briefs per iteration and stdev likely ~0.04, we can't
+distinguish real gains from noise until we have repeats.
