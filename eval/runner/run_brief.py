@@ -218,8 +218,8 @@ async def _run_agent(
         setting_sources=[],
         # Enable extended thinking so we can watch the agent reason before
         # each action. 8192 tokens is plenty for CAD-build reasoning.
-        thinking=True,
-        max_thinking_tokens=8192,
+        # SDK expects a dict shape, not a bare bool.
+        thinking={"type": "enabled", "budget_tokens": 8192},
     )
 
     prompt_blocks = _compose_prompt(brief, agent_step_target)
