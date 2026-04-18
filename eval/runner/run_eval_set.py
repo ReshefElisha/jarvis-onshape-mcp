@@ -95,7 +95,7 @@ def run_eval_set(
     full: bool = False,
     parent_variant_id: Optional[str] = None,
     mutation_description: Optional[str] = None,
-    max_turns: int = 50,
+    max_turns: int = 100,
 ) -> dict:
     cfg = json.loads(EVAL_SET_PATH.read_text())
     state = _load_state()
@@ -165,7 +165,7 @@ def _cli() -> int:
                    help="Run every brief in the chosen tier, not just the iteration sample.")
     p.add_argument("--parent-variant-id", default=None)
     p.add_argument("--mutation-description", default=None)
-    p.add_argument("--max-turns", type=int, default=50)
+    p.add_argument("--max-turns", type=int, default=100)
     args = p.parse_args()
     run_eval_set(
         variant_id=args.variant_id,

@@ -99,11 +99,11 @@ def _compose_prompt(brief: dict, agent_step_target: Path) -> list[dict]:
     # Text goes first so the image(s) land under it in the agent's view.
     text = brief["brief_text"] + (
         "\n\n"
-        "WHEN FINISHED: call mcp__onshape__export_part_studio to produce a STEP "
-        "file, then write the STEP bytes returned by that tool to the local path "
-        f"{agent_step_target!s} using the Write tool. Then reply DONE in plain "
-        "text and stop using tools. Do NOT skip the local Write — the grader "
-        "reads the STEP from disk, not from Onshape."
+        "WHEN FINISHED: call mcp__onshape__export_part_studio with format=STEP, "
+        "then reply DONE in plain text and stop using tools. The harness copies "
+        "the exported STEP to disk for you — do NOT Read or Write the STEP file "
+        "yourself. Extra Read/Write calls burn turns and pull the file contents "
+        "into your context for no reason."
     )
     blocks.append({"type": "text", "text": text})
 
@@ -307,6 +307,18 @@ async def _run_agent(
                     short = text_preview.strip().splitlines()[0] if text_preview.strip() else ""
                     print(f"[turn {turn_ix}] ← {short[:200]}", flush=True)
                     _live(f"t{turn_ix} ← {short[:200]}")
+                    # Auto-capture STEP exports so the agent doesn't have to
+                    # Read+Write the file (which burns turns and pollutes its
+                    # context with ~100KB of STEP text per export).
+                    if "Export DONE" in text_preview and "Path:" in text_preview:
+                        import re
+                        m = re.search(r"Path:\s*(\S+)", text_preview)
+                        if m:
+                            src = Path(m.group(1))
+                            if src.exists():
+                                agent_step_target.parent.mkdir(parents=True, exist_ok=True)
+                                agent_step_target.write_bytes(src.read_bytes())
+                                _live(f"t{turn_ix} ⇒ auto-copied STEP → {agent_step_target.name}")
             continue
 
         if isinstance(message, ResultMessage):
@@ -339,7 +351,7 @@ def run_brief(
     brief_id: str,
     variant_id: Optional[str] = None,
     out_root: Optional[Path] = None,
-    max_turns: int = 50,
+    max_turns: int = 100,
 ) -> dict:
     brief = _load_brief(brief_id)
     ref_step = MANIFEST_PATH.parent / brief["reference_step_path"]
@@ -394,7 +406,7 @@ def _cli() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--brief-id", required=True)
     p.add_argument("--variant-id", default=None, help="Variant id; omit for baseline.")
-    p.add_argument("--max-turns", type=int, default=50)
+    p.add_argument("--max-turns", type=int, default=100)
     args = p.parse_args()
     result = run_brief(
         brief_id=args.brief_id,
