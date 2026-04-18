@@ -319,6 +319,42 @@ class TestSketchBuilderArc:
         sketch.add_arc(center=(0, 0), radius=1, is_construction=True)
         assert sketch.entities[0]["isConstruction"] is True
 
+    def test_arc_spec_short_arc_default_flips_long_ccw_sweep(self):
+        """Peer ot0309vt clevis dogfood #3: seed start=38°, end=322° (CCW
+        sweep 284°) should auto-flip to the 76° short arc when the default
+        short_arc=True applies."""
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "38 deg", "end_angle": "322 deg",
+        })
+        # Short arc: start+end got swapped so CCW sweep is ≤ 180°.
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert sweep <= math.pi, f"expected short arc (≤π sweep); got {sweep}"
+
+    def test_arc_spec_short_arc_false_preserves_long_sweep(self):
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "38 deg", "end_angle": "322 deg",
+            "short_arc": False,
+        })
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert sweep > math.pi, f"expected long arc (>π sweep); got {sweep}"
+
+    def test_arc_spec_short_arc_noop_when_sweep_already_short(self):
+        """If the user's sweep is already ≤180°, short_arc default is a no-op."""
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "0 deg", "end_angle": "90 deg",
+        })
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert abs(sweep - math.pi / 2) < 1e-9
+
     def test_add_arc_variable_radius_emits_radius_constraint(self):
         sketch = SketchBuilder()
         sketch.add_arc(center=(0, 0), radius=1, variable_radius="arcR")

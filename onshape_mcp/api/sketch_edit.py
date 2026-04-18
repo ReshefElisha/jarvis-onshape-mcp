@@ -154,10 +154,22 @@ def _merge(
         wire_entity_id(c) for c in existing_constraints if wire_entity_id(c)
     }
 
-    # Validate addEntities don't collide. wire_entity_id accepts both
-    # pre-serialization `id` and post-serialization `entityId` — the
-    # orchestrator may serialize before calling _merge, so we must accept
-    # either shape here.
+    # removeIds: take effect against entity ids AND constraint ids
+    # (callers want a single bag for "drop these"). Anything that doesn't
+    # match either is reported back to the caller as a diff inconsistency.
+    # IMPORTANT: compute this BEFORE the add-collision check so same-call
+    # retarget (remove "foo" + add new "foo") works per the tool contract.
+    remove_set = set(remove_ids)
+    removed_entity_ids = remove_set & existing_entity_ids
+    removed_constraint_ids_direct = remove_set & existing_constraint_ids
+    # ids that will be GONE after this call — safe to shadow in addEntities.
+    post_remove_entity_ids = existing_entity_ids - removed_entity_ids
+    post_remove_constraint_ids = existing_constraint_ids - removed_constraint_ids_direct
+
+    # Validate addEntities don't collide with POST-remove state.
+    # wire_entity_id accepts both pre-serialization `id` and
+    # post-serialization `entityId` — the orchestrator may serialize before
+    # calling _merge, so we must accept either shape here.
     add_entity_ids: List[str] = []
     for i, e in enumerate(add_entities):
         eid = wire_entity_id(e)
@@ -165,7 +177,7 @@ def _merge(
             raise ValueError(
                 f"addEntities[{i}] must carry a non-empty `id` string; got {e!r}"
             )
-        if eid in existing_entity_ids or eid in add_entity_ids:
+        if eid in post_remove_entity_ids or eid in add_entity_ids:
             raise ValueError(
                 f"addEntities[{i}].id={eid!r} collides with an existing or "
                 f"earlier-added entity. removeIds it first if you want to "
@@ -182,19 +194,12 @@ def _merge(
             # validation rather than raising, since one-shot constraints
             # are a legitimate pattern.
             continue
-        if cid in existing_constraint_ids or cid in add_constraint_ids:
+        if cid in post_remove_constraint_ids or cid in add_constraint_ids:
             raise ValueError(
                 f"addConstraints[{i}].id={cid!r} collides with an existing or "
                 f"earlier-added constraint."
             )
         add_constraint_ids.append(cid)
-
-    # removeIds: take effect against entity ids AND constraint ids
-    # (callers want a single bag for "drop these"). Anything that doesn't
-    # match either is reported back to the caller as a diff inconsistency.
-    remove_set = set(remove_ids)
-    removed_entity_ids = remove_set & existing_entity_ids
-    removed_constraint_ids_direct = remove_set & existing_constraint_ids
 
     # Cascade: any existing constraint that references one of the removed
     # entity ids also gets dropped. Sub-point refs ("line1.start") count

@@ -217,6 +217,26 @@ def test_merge_unmatched_remove_id_is_no_op_not_error():
     assert {wire_entity_id(e) for e in me} == {"line1", "line2_new"}
 
 
+def test_merge_same_call_retarget_by_id():
+    """Tool description says "To retarget an id, removeIds it first and then
+    addEntities it back." Regression from peer ot0309vt clevis dogfood —
+    the collision check used to run BEFORE removeIds took effect, so the
+    documented pattern raised. Fixed by computing post-remove state first
+    then validating adds against that."""
+    me, mc, direct_removed, cascaded = _merge(
+        existing_entities=[LINE1],
+        existing_constraints=[],
+        add_entities=[{"id": "line1", "type": "line", "start": [0, 0], "end": [5, 5]}],
+        add_constraints=[],
+        remove_ids=["line1"],
+    )
+    remaining_ids = {wire_entity_id(e) for e in me}
+    assert remaining_ids == {"line1"}
+    new_line = [e for e in me if wire_entity_id(e) == "line1"][0]
+    # The new one is the one we added (seed at [0,0]), not the original LINE1.
+    assert new_line.get("start") == [0, 0]
+
+
 def test_merge_combined_diff_in_one_call():
     """Realistic scenario: drop a wrong line, add the corrected one + its
     coincident constraint, all in one edit_sketch call."""

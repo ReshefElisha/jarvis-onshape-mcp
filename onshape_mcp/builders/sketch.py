@@ -119,6 +119,15 @@ def serialize_entity_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
         r = _to_meters(spec["radius"])
         start_angle = parse_angle(spec.get("start_angle", 0.0)).radians
         end_angle = parse_angle(spec.get("end_angle", math.pi / 2)).radians
+        # short_arc (default True) matches Onshape UI's three-point-arc
+        # default: if the CCW sweep from start to end exceeds 180°, swap
+        # endpoints so the arc goes the short way. Peer clevis dogfood
+        # hit silent wrongness on start=38°, end=322° → 284° long-way
+        # arc; the explicit "I want the long way" case is `short_arc: false`.
+        short_arc = bool(spec.get("short_arc", True))
+        sweep_ccw = (end_angle - start_angle) % (2.0 * math.pi)
+        if short_arc and sweep_ccw > math.pi:
+            start_angle, end_angle = end_angle, start_angle
         return {
             "btType": "BTMSketchCurveSegment-155",
             "entityId": entity_id,
