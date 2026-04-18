@@ -31,14 +31,24 @@ from eval.grader.compare_step import bbox, load_step
 
 
 def _rotate_shape(shape, axis: str, degrees: float):
-    """Rotate a shape about one of the world axes through the origin."""
+    """Rotate a shape about a world-axis-aligned line THROUGH ITS BBOX CENTER.
+
+    Rotating about the origin when the part is offset from origin mixes
+    rotation with translation — visually the part swings to a new
+    position, which isn't what we want. We want in-place reorientation,
+    so anchor the rotation axis at the part's centroid.
+    """
     dir_map = {"X": (1.0, 0.0, 0.0),
                "Y": (0.0, 1.0, 0.0),
                "Z": (0.0, 0.0, 1.0)}
     if axis not in dir_map:
         raise ValueError(f"rotate_axis must be X|Y|Z, got {axis!r}")
+    b = bbox(shape)
+    cx = (b.xmin + b.xmax) / 2
+    cy = (b.ymin + b.ymax) / 2
+    cz = (b.zmin + b.zmax) / 2
     trsf = gp_Trsf()
-    trsf.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(*dir_map[axis])),
+    trsf.SetRotation(gp_Ax1(gp_Pnt(cx, cy, cz), gp_Dir(*dir_map[axis])),
                      math.radians(degrees))
     return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
 
@@ -85,13 +95,14 @@ PARTS = [
            "SolidWorks Model Mania 2019 – Phase 1",
            "mm_2019_phase1.png",
            views=("iso_flip", "front", "top", "right")),
-    # Rotate 180° about world X so the flange (previously hidden behind the
-    # yoke on the native orientation) faces the camera.
-    MMPart("mm_2022_phase1", "Model Mania 2022 (Phase 1).stp",
-           "SolidWorks Model Mania 2022 – Phase 1",
-           "mm_2022_phase1.jpg",
+    # ⚠ The zip "model-mania-2022-phase-1" actually contains the 2021 Phase 1
+    # part (mislabeled by SolidWorks' snapshot export). Slug + drawing
+    # corrected to 2021.
+    MMPart("mm_2021_phase1", "Model Mania 2022 (Phase 1).stp",
+           "SolidWorks Model Mania 2021 – Phase 1",
+           "mm_2021_phase1.jpg",
            views=("iso_flip", "front", "top", "right"),
-           rotate_axis="X", rotate_deg=180.0),
+           rotate_axis="Y", rotate_deg=180.0),
     MMPart("mm_2025_phase1", "Model Mania 2025 (Phase 1).stp",
            "SolidWorks Model Mania 2025 – Phase 1",
            "mm_2025_phase1.pdf"),

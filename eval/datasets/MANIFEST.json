@@ -397,18 +397,6 @@
       "notes": "SolidWorks Model Mania competition Phase 1 part. Non-obvious compound geometry intended to challenge skilled human CAD users under time pressure. No accompanying drawing \u2014 evaluate via shape replication against the STEP ground truth."
     },
     {
-      "brief_id": "mm_2022_phase1_envelope",
-      "brief_modality": "render_plus_envelope",
-      "brief_text": "Build the mechanical part shown in the reference isometric render. The part fits inside an approximately 106 \u00d7 60 \u00d7 106 mm axis-aligned bounding box. This is a SolidWorks Model Mania competition part \u2014 expect compound features, thoughtful dimensional relationships, and non-obvious interactions between geometry. Match the shape and feature layout as closely as possible. (SolidWorks Model Mania 2022 \u2013 Phase 1)",
-      "brief_text_hash": "f418b53800486b44",
-      "brief_image_path": "modelmania/iso/mm_2022_phase1.png",
-      "reference_step_path": "modelmania/step/mm_2022_phase1.step",
-      "reference_png_path": "modelmania/iso/mm_2022_phase1.png",
-      "source_dataset": "modelmania",
-      "difficulty_tier": "hard",
-      "notes": "SolidWorks Model Mania competition Phase 1 part. Non-obvious compound geometry intended to challenge skilled human CAD users under time pressure. No accompanying drawing \u2014 evaluate via shape replication against the STEP ground truth."
-    },
-    {
       "brief_id": "mm_2025_phase1_envelope",
       "brief_modality": "render_plus_envelope",
       "brief_text": "Build the mechanical part shown in the reference isometric render. The part fits inside an approximately 154 \u00d7 54 \u00d7 100 mm axis-aligned bounding box. This is a SolidWorks Model Mania competition part \u2014 expect compound features, thoughtful dimensional relationships, and non-obvious interactions between geometry. Match the shape and feature layout as closely as possible. (SolidWorks Model Mania 2025 \u2013 Phase 1)",
@@ -457,18 +445,6 @@
       "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
     },
     {
-      "brief_id": "mm_2022_phase1_drawing",
-      "brief_modality": "engineering_drawing",
-      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2022 \u2013 Phase 1)",
-      "brief_text_hash": "ba00fd8e305c8634",
-      "brief_image_path": "modelmania/drawing/mm_2022_phase1.png",
-      "reference_step_path": "modelmania/step/mm_2022_phase1.step",
-      "reference_png_path": "modelmania/iso/mm_2022_phase1.png",
-      "source_dataset": "modelmania",
-      "difficulty_tier": "hard",
-      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
-    },
-    {
       "brief_id": "mm_2025_phase1_drawing",
       "brief_modality": "engineering_drawing",
       "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2025 \u2013 Phase 1)",
@@ -476,6 +452,30 @@
       "brief_image_path": "modelmania/drawing/mm_2025_phase1.png",
       "reference_step_path": "modelmania/step/mm_2025_phase1.step",
       "reference_png_path": "modelmania/iso/mm_2025_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
+    },
+    {
+      "brief_id": "mm_2021_phase1_envelope",
+      "brief_modality": "render_plus_envelope",
+      "brief_text": "Build the mechanical part shown in the reference isometric render. The part fits inside an approximately 106 \u00d7 60 \u00d7 106 mm axis-aligned bounding box. This is a SolidWorks Model Mania competition part \u2014 expect compound features, thoughtful dimensional relationships, and non-obvious interactions between geometry. Match the shape and feature layout as closely as possible. (SolidWorks Model Mania 2021 \u2013 Phase 1)",
+      "brief_text_hash": "f9f772a1f6990897",
+      "brief_image_path": "modelmania/iso/mm_2021_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2021_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2021_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania competition part. Non-obvious compound geometry intended to challenge skilled human CAD users under time pressure. Render+envelope tier: evaluate via shape replication against the STEP."
+    },
+    {
+      "brief_id": "mm_2021_phase1_drawing",
+      "brief_modality": "engineering_drawing",
+      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2021 \u2013 Phase 1)",
+      "brief_text_hash": "6f1acdc88076fb43",
+      "brief_image_path": "modelmania/drawing/mm_2021_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2021_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2021_phase1.png",
       "source_dataset": "modelmania",
       "difficulty_tier": "hard",
       "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
