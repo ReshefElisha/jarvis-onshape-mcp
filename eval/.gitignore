@@ -1,0 +1,13 @@
+# Heavy artifacts — track provenance in MANIFEST.json, not the bytes.
+datasets/text2cad/raw/
+datasets/text2cad/samples/
+datasets/text2cad/step/
+datasets/cadprompt/raw/
+datasets/cadprompt/step/
+datasets/modelmania/step/
+
+# Per-run artifacts.
+runs/
+
+# Isolated eval venv.
+.venv/
