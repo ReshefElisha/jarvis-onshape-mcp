@@ -40,3 +40,37 @@ CLAUDE.md + eval/README.md now pinned. Directory scaffold in place. Next cold-se
 ## Rulings from Shef
 
 - **2026-04-18**: pip-only eval deps (`cadquery-ocp`). Datasets via direct `git clone`.
+
+## 2026-04-18 — Phase 3 first baseline run, found dataset bug
+
+First real baseline run (1776533407-baseline) on seed_04, 05, 06.
+- seed_04_plate_one_hole: composite 1.0
+- seed_05_plate_four_holes: composite 1.0
+- seed_06_washer: composite 0.3 **due to dataset bug**, not agent failure
+
+Two dataset bugs in seed_06_washer:
+
+1. `build_kwargs={"h": 0.003}` — thickness was 3 micrometers instead
+   of 3 mm. Reference washer volume was 1.59 mm³; agent built a proper
+   1590 mm³ washer and was marked wrong. Fix: `h: 3.0`.
+
+2. Brief said "Axis along world Z, centered on origin." The reference
+   generator (cylinder + subtract) extrudes z=[0, h], not z=[-h/2, h/2].
+   Agent sensibly interpreted "centered on origin" as fully centered
+   (z=-1.5 to 1.5) while the reference was bottom-on-XY-plane. Disagreement
+   shows up as L4 IoU ≈ 0.33 (volumes match, positions offset by h/2).
+   Fix: tightened brief to match the standoff brief's phrasing
+   ("base on the XY plane centered on origin").
+
+Also: bootstrap_seed.py rewrites MANIFEST.json wholesale when rerun.
+That clobbers the NIST + Model Mania entries. Left as known issue;
+patched seed_06 surgically in MANIFEST instead of letting bootstrap
+overwrite. TODO: make bootstrap_seed.py merge rather than replace.
+
+First scoreboard entry (1776533407) flagged `invalid: true`. Launching
+rerun next.
+
+**Lesson for the loop**: regressions in the dataset are invisible to
+the loop agent and corrupt the signal. The grader catches agent bugs;
+only human review catches reference bugs. Phase 3's manual-read pass
+is load-bearing.

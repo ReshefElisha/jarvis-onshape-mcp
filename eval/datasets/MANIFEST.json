@@ -60,13 +60,14 @@
     },
     {
       "brief_id": "seed_06_washer",
-      "brief_text": "Washer: outer diameter 30 mm, inner diameter 15 mm, thickness 3 mm. Axis along world Z, centered on origin.",
-      "brief_text_hash": "e07502fd324e0202",
+      "brief_text": "Washer: outer diameter 30 mm, inner diameter 15 mm, thickness 3 mm. Axis along world Z, base on the XY plane centered on origin.",
+      "brief_text_hash": "a06ac6e544d5df42",
       "brief_image_path": null,
       "reference_step_path": "seed/step/seed_06_washer.step",
       "reference_png_path": "seed/png/seed_06_washer.png",
       "source_dataset": "seed",
-      "difficulty_tier": "easy"
+      "difficulty_tier": "easy",
+      "reference_step_sha256": "7f66e7e62942a4684f7dc793742e8eea3852dbb39abad5ce1cec4670585f2f21"
     },
     {
       "brief_id": "seed_07_standoff",

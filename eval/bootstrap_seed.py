@@ -437,10 +437,10 @@ SPECS: list[BriefSpec] = [
         brief_id="seed_06_washer",
         brief_text=(
             "Washer: outer diameter 30 mm, inner diameter 15 mm, thickness 3 mm. "
-            "Axis along world Z, centered on origin."
+            "Axis along world Z, base on the XY plane centered on origin."
         ),
         difficulty_tier="easy",
-        build_fn=washer, build_kwargs={"od": 30.0, "id_": 15.0, "h": 0.003},
+        build_fn=washer, build_kwargs={"od": 30.0, "id_": 15.0, "h": 3.0},
     ),
     BriefSpec(
         brief_id="seed_07_standoff",
