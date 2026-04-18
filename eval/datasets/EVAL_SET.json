@@ -1,19 +1,53 @@
 {
-  "eval_set_id": "eval_v1",
-  "note": "AutoResearch eval config. Early iterations should sample 2–3 briefs per mutation (fast evolution); periodic full-set runs validate that improvements generalize. Deterministic — any brief_id added/removed bumps eval_set_id and makes prior scoreboard entries incomparable.",
+  "eval_set_id": "eval_v2",
+  "note": "Tiered curriculum. Loop samples from the current tier each iteration; promotes to the next tier when the current variant hits `promote_threshold` for `promote_stable_iterations` in a row. Dataset frozen — only `current_tier` in eval/state.json mutates as the loop progresses.",
   "per_iteration_sample_size": 3,
-  "per_iteration_sampling": "round_robin_by_difficulty_tier",
+  "per_iteration_sampling": "round_robin_within_current_tier",
+  "promote_threshold": 0.70,
+  "promote_stable_iterations": 3,
   "full_validation_every_n_iterations": 10,
-  "full_set_brief_ids": [
-    "seed_04_plate_one_hole",
-    "seed_08_l_bracket",
-    "seed_09_slotted_strap",
-    "nist_ctc_01_envelope",
-    "nist_ftc_09_envelope",
-    "nist_ctc_04_drawing",
-    "mm_2019_phase1_envelope",
-    "mm_2026_jan_envelope",
-    "mm_2021_phase1_drawing",
-    "mm_2025_phase1_drawing"
-  ]
+  "tiers": {
+    "easy": {
+      "description": "Trivial procedural parts. Claude should one-shot these with the current skill; if it can't, the skill is broken. Includes all seed_ briefs plus a couple of light NIST envelope-tier parts.",
+      "brief_ids": [
+        "seed_01_box_40_30_20",
+        "seed_02_cube_25",
+        "seed_03_cylinder_d20_h30",
+        "seed_04_plate_one_hole",
+        "seed_05_plate_four_holes",
+        "seed_06_washer",
+        "seed_07_standoff",
+        "seed_08_l_bracket",
+        "seed_09_slotted_strap",
+        "seed_10_plate_with_hole_offset"
+      ]
+    },
+    "medium": {
+      "description": "NIST and Model Mania envelope tier — render + bbox envelope, no GD&T. Tests shape replication without dimensional rigor.",
+      "brief_ids": [
+        "nist_ctc_04_envelope",
+        "nist_ctc_05_envelope",
+        "nist_ftc_06_envelope",
+        "nist_ftc_09_envelope",
+        "mm_2019_phase1_envelope",
+        "mm_2021_phase1_envelope",
+        "mm_2025_phase1_envelope",
+        "mm_2026_jan_envelope"
+      ]
+    },
+    "hard": {
+      "description": "Engineering drawing tier with real GD&T. Agent must read the drawing sheet and reproduce dimensions + tolerances. All NIST drawing briefs plus Model Mania drawing briefs.",
+      "brief_ids": [
+        "nist_ctc_01_drawing",
+        "nist_ctc_02_drawing",
+        "nist_ctc_03_drawing",
+        "nist_ctc_04_drawing",
+        "nist_ftc_06_drawing",
+        "nist_ftc_09_drawing",
+        "mm_2019_phase1_drawing",
+        "mm_2021_phase1_drawing",
+        "mm_2025_phase1_drawing"
+      ]
+    }
+  }
 }
