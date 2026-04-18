@@ -143,9 +143,17 @@ change — hub.center can slide ~1 mm when you retarget dimensions.
 - **Entity IDs must be unique within a sketch.** Duplicate id → raise.
 - **Sub-point refs aren't validated.** `circle.start` makes no sense
   but the builder won't catch it; Onshape rejects at solve time.
-- **Over-constraint surfaces as `SKETCH_UNSOLVABLE_CONSTRAINT`
-  WARNING.** Feature still persists, but geometry is wrong. Look at
-  the constraint list and drop a redundant one.
+- **Over-constraint surfaces as `SKETCH_SOLVE_FAILED` /
+  `SKETCH_UNSOLVABLE_CONSTRAINT` WARNING.** Onshape's REST API does
+  NOT return per-constraint diagnostics — silence is a platform
+  limitation. Recovery is client-side bisection: give every
+  `addConstraint` an explicit `id`, and when a solve fails use
+  `edit_sketch` with `removeIds` to drop half the last-added
+  constraints, re-POST, and binary-search. Typical culprits:
+  mutually exclusive pairs (PARALLEL + PERPENDICULAR on the same
+  two lines), redundant positional constraints (COINCIDENT chain
+  over-specifying endpoints), or tangent-line geometry that forces
+  an arc into an impossible shape.
 
 ### Iteration with edit_sketch
 
