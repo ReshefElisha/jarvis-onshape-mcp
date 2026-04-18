@@ -210,10 +210,14 @@ def _tessellate_edges(shape: TopoDS_Shape, deflection: float) -> list:
 
 _VIEW_CAMERAS = {
     # (position_vec_normalized, up_vec)  — all in world axes
-    "iso":   ((0.8, -0.8, 0.6), (0.0, 0.0, 1.0)),
-    "front": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
-    "top":   ((0.0, 0.0, 1.0),  (0.0, 1.0, 0.0)),
-    "right": ((1.0, 0.0, 0.0),  (0.0, 0.0, 1.0)),
+    "iso":      ((0.8, -0.8, 0.6), (0.0, 0.0, 1.0)),
+    "iso_flip": ((-0.8, 0.8, 0.6), (0.0, 0.0, 1.0)),  # 180° around Z for back-side ISO
+    "front":    ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+    "back":     ((0.0, 1.0, 0.0),  (0.0, 0.0, 1.0)),
+    "top":      ((0.0, 0.0, 1.0),  (0.0, 1.0, 0.0)),
+    "bottom":   ((0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+    "right":    ((1.0, 0.0, 0.0),  (0.0, 0.0, 1.0)),
+    "left":     ((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
 }
 
 
@@ -305,7 +309,8 @@ def _render_view(shape: TopoDS_Shape, view_name: str, size: int,
     cam.SetFocalPoint(cx, cy, cz)
     cam.SetPosition(cx + d * dir_vec[0], cy + d * dir_vec[1], cz + d * dir_vec[2])
     cam.SetViewUp(*up_vec)
-    if view_name in ("front", "top", "right"):
+    # Perspective for iso/iso_flip, orthographic for all other single-axis views.
+    if view_name not in ("iso", "iso_flip"):
         cam.ParallelProjectionOn()
     renderer.ResetCameraClippingRange()
     renderer.ResetCamera()
@@ -319,15 +324,21 @@ def _render_view(shape: TopoDS_Shape, view_name: str, size: int,
     return w2i.GetOutput()
 
 
-def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
-    """Render shape as a 2×2 multi-view composite (iso + front + top + right).
+DEFAULT_VIEWS = ("iso", "front", "top", "right")
 
-    Orthographic projections for front/top/right so dimensions can be
-    read off the image. Perspective (iso) for the hero view.
-    Composite is written to `path`. The filename keeps `_iso` for
-    backward-compat with the manifest, but the content is a 4-panel
-    montage.
+
+def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800,
+                   views: tuple[str, ...] = DEFAULT_VIEWS) -> None:
+    """Render shape as a 2×2 multi-view composite.
+
+    Orthographic projections are used for all non-iso views so dimensions
+    can be read off the image; perspective is used for iso and iso_flip.
+    `views` picks which 4 to include (must be length 4, ordered top-left,
+    top-right, bottom-left, bottom-right). Supported keys are the keys of
+    `_VIEW_CAMERAS`: iso, iso_flip, front, back, top, bottom, right, left.
     """
+    if len(views) != 4:
+        raise ValueError(f"render_iso_png needs exactly 4 views; got {views}")
     from PIL import Image
     import numpy as np
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -340,8 +351,8 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     edge_polylines = _tessellate_edges(shape, diag * 0.0005)
 
     panel = size // 2
-    panels: dict[str, Image.Image] = {}
-    for view in ("iso", "front", "top", "right"):
+    panels: list[Image.Image] = []
+    for view in views:
         img_data = _render_view(shape, view, panel, tris, edge_polylines)
         dims = img_data.GetDimensions()
         arr = np.frombuffer(
@@ -349,13 +360,13 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
         ).reshape(dims[1], dims[0], -1)
         # VTK writes (0,0) at bottom-left; flip to image convention.
         arr = np.flipud(arr).copy()
-        panels[view] = Image.fromarray(arr[:, :, :3])
+        panels.append(Image.fromarray(arr[:, :, :3]))
 
     composite = Image.new("RGB", (size, size), (255, 255, 255))
-    composite.paste(panels["iso"],   (0, 0))
-    composite.paste(panels["front"], (panel, 0))
-    composite.paste(panels["top"],   (0, panel))
-    composite.paste(panels["right"], (panel, panel))
+    composite.paste(panels[0], (0, 0))
+    composite.paste(panels[1], (panel, 0))
+    composite.paste(panels[2], (0, panel))
+    composite.paste(panels[3], (panel, panel))
     composite.save(path)
 
 

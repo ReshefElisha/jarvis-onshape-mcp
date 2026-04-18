@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "n_briefs": 37,
+  "n_briefs": 41,
   "source_sets": [
     "modelmania",
     "nist_pmi",
@@ -431,6 +431,54 @@
       "source_dataset": "modelmania",
       "difficulty_tier": "hard",
       "notes": "SolidWorks Model Mania competition Phase 1 part. Non-obvious compound geometry intended to challenge skilled human CAD users under time pressure. No accompanying drawing \u2014 evaluate via shape replication against the STEP ground truth."
+    },
+    {
+      "brief_id": "mm_2009_phase1_drawing",
+      "brief_modality": "engineering_drawing",
+      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2009 \u2013 Phase 1)",
+      "brief_text_hash": "5abb073402ca6edb",
+      "brief_image_path": "modelmania/drawing/mm_2009_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2009_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2009_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
+    },
+    {
+      "brief_id": "mm_2019_phase1_drawing",
+      "brief_modality": "engineering_drawing",
+      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2019 \u2013 Phase 1)",
+      "brief_text_hash": "f778690160d18920",
+      "brief_image_path": "modelmania/drawing/mm_2019_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2019_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2019_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
+    },
+    {
+      "brief_id": "mm_2022_phase1_drawing",
+      "brief_modality": "engineering_drawing",
+      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2022 \u2013 Phase 1)",
+      "brief_text_hash": "ba00fd8e305c8634",
+      "brief_image_path": "modelmania/drawing/mm_2022_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2022_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2022_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
+    },
+    {
+      "brief_id": "mm_2025_phase1_drawing",
+      "brief_modality": "engineering_drawing",
+      "brief_text": "Build the mechanical part specified by the attached SolidWorks Model Mania drawing sheet. Read the orthographic views, dimensions, and any tolerances carefully; the drawing is the ground truth for geometry. Model Mania competition parts are designed to be non-obvious under time pressure \u2014 watch for compound features whose dimensional interactions matter. (SolidWorks Model Mania 2025 \u2013 Phase 1)",
+      "brief_text_hash": "a04ba72376bd0a6d",
+      "brief_image_path": "modelmania/drawing/mm_2025_phase1.png",
+      "reference_step_path": "modelmania/step/mm_2025_phase1.step",
+      "reference_png_path": "modelmania/iso/mm_2025_phase1.png",
+      "source_dataset": "modelmania",
+      "difficulty_tier": "hard",
+      "notes": "SolidWorks Model Mania problem drawing sourced from the official archive. Dimensional rigor expected \u2014 match the drawing, not just the overall shape."
     }
   ]
 }
