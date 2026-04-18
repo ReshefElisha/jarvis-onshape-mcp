@@ -46,6 +46,14 @@ load_dotenv(REPO / ".env")
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+# Force line-buffered stdout so `tail -F` sees output in real time even when
+# this process's stdout is a pipe (e.g. backgrounded via shell redirection).
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 from eval.grader.rubric import score_step_pair
 
 
@@ -208,6 +216,10 @@ async def _run_agent(
         system_prompt=system,
         max_turns=max_turns,
         setting_sources=[],
+        # Enable extended thinking so we can watch the agent reason before
+        # each action. 8192 tokens is plenty for CAD-build reasoning.
+        thinking=True,
+        max_thinking_tokens=8192,
     )
 
     prompt_blocks = _compose_prompt(brief, agent_step_target)
@@ -239,12 +251,18 @@ async def _run_agent(
             turn_ix += 1
             for block in message.content:
                 btype = getattr(block, "type", None) or block.__class__.__name__
-                if btype in ("text", "TextBlock"):
+                if btype in ("thinking", "ThinkingBlock"):
+                    thinking = getattr(block, "thinking", "") or ""
+                    _log("thinking", {"turn": turn_ix, "thinking": thinking})
+                    if thinking.strip():
+                        print(f"\n[turn {turn_ix}] 🧠 thinking:\n{thinking}\n", flush=True)
+                        _live(f"t{turn_ix} 🧠 {thinking.strip()[:800]}")
+                elif btype in ("text", "TextBlock"):
                     text = getattr(block, "text", "")
                     _log("assistant_text", {"turn": turn_ix, "text": text})
                     if text.strip():
-                        print(f"\n[turn {turn_ix}] assistant:\n{text}\n", flush=True)
-                        _live(f"t{turn_ix} 💭 {text.strip()[:500]}")
+                        print(f"\n[turn {turn_ix}] 💬 assistant:\n{text}\n", flush=True)
+                        _live(f"t{turn_ix} 💬 {text.strip()[:500]}")
                 elif btype in ("tool_use", "ToolUseBlock"):
                     name = getattr(block, "name", "?")
                     inp = getattr(block, "input", {})
