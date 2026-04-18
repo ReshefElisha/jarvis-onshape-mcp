@@ -44,13 +44,37 @@ from OCP.TopLoc import TopLoc_Location
 
 
 def load_step(path: str | Path) -> TopoDS_Shape:
-    """Read a STEP file. Returns a single compound shape (may contain many solids)."""
+    """Read a STEP file and normalize units to millimeters.
+
+    The grader + renderers work in MILLIMETERS across the board. STEP
+    files declare their own length unit; OCP's reader applies it
+    literally, so STEPs from different sources come out at different
+    scales (NIST AP242 → meters, SolidWorks Model Mania → mm, etc.).
+    Heuristic: mechanical parts are ~10–500 mm in typical extent. If
+    the loaded shape has a max bbox extent < 1.0 (impossible for a
+    mm-scale mechanical part), the STEP was in meters → scale by 1000.
+    """
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Trsf
+
     reader = STEPControl_Reader()
     status = reader.ReadFile(str(path))
     if status != IFSelect_RetDone:
         raise IOError(f"STEPControl_Reader failed on {path}: status={status}")
     reader.TransferRoots()
-    return reader.OneShape()
+    shape = reader.OneShape()
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box)
+    xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+    dims = [xmax - xmin, ymax - ymin, zmax - zmin]
+    max_extent = max(dims) if dims else 0.0
+    if 0 < max_extent < 1.0:
+        # Shape is in meters; scale up to mm.
+        trsf = gp_Trsf()
+        trsf.SetScaleFactor(1000.0)
+        shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+    return shape
 
 
 # --- Scalar measurements ---------------------------------------------

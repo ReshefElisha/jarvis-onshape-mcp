@@ -1,8 +1,8 @@
 # SHA256 of the LOCKED grader module files. Every run checks this matches
 # before scoring; any mismatch invalidates that run's scoreboard entry.
 # To rev: bump the number below AND document why in eval/SESSION_NOTES.md.
-grader_version: 1
-538f4df67100d366913ce7441ee16c5a8c1734f22d6255d6d82f26deb972150e  eval/grader/compare_step.py
+grader_version: 2
+9c0c84e5dd187179b9fc183733add98b963ed77ae9e668754daf7883018cd957  eval/grader/compare_step.py
 93647baff801078f571e961006fbcf1e25a7972bd71da14ce904c9db4e6471e2  eval/grader/rubric.py
 59da964bc97984bb9fbb9d439c2cc4c45b93dfb10c9b84eb83db5fe7214380ea  eval/grader/__init__.py
 5acc2d108228b9f97d15fc1666a806233d69224283a8404ff13002be5afca56f  eval/grader/requirements.txt

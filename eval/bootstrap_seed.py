@@ -82,7 +82,7 @@ def union(a: TopoDS_Shape, b: TopoDS_Shape) -> TopoDS_Shape:
 def plate_with_hole(plate_dx: float, plate_dy: float, plate_dz: float,
                     hole_r: float, hole_x: float, hole_y: float) -> TopoDS_Shape:
     p = box(plate_dx, plate_dy, plate_dz)
-    h = cylinder(hole_r, plate_dz + 0.002, hole_x, hole_y, -0.001)
+    h = cylinder(hole_r, plate_dz + 2.0, hole_x, hole_y, -1.0)
     return subtract(p, h)
 
 
@@ -91,7 +91,7 @@ def plate_with_four_holes(dx: float, dy: float, dz: float,
     p = box(dx, dy, dz)
     for hx, hy in [(margin, margin), (dx - margin, margin),
                    (margin, dy - margin), (dx - margin, dy - margin)]:
-        h = cylinder(hole_r, dz + 0.002, hx, hy, -0.001)
+        h = cylinder(hole_r, dz + 2.0, hx, hy, -1.0)
         p = subtract(p, h)
     return p
 
@@ -104,7 +104,7 @@ def l_bracket(leg_length: float, leg_width: float, thickness: float) -> TopoDS_S
 
 def standoff(od: float, id_: float, h: float) -> TopoDS_Shape:
     outer = cylinder(od / 2, h)
-    inner = cylinder(id_ / 2, h + 0.002, z=-0.001)
+    inner = cylinder(id_ / 2, h + 2.0, z=-1.0)
     return subtract(outer, inner)
 
 
@@ -116,14 +116,14 @@ def slotted_strap(length: float, width: float, thickness: float,
                   slot_length: float, slot_width: float) -> TopoDS_Shape:
     strap = box(length, width, thickness)
     # Slot: two half-cylinders + rectangle. Simpler: use capped rectangle.
-    slot_rect = box(slot_length - slot_width, slot_width, thickness + 0.002)
+    slot_rect = box(slot_length - slot_width, slot_width, thickness + 2.0)
     slot_rect = translate(slot_rect, (length - (slot_length - slot_width)) / 2,
-                          (width - slot_width) / 2, -0.001)
-    cap_a = cylinder(slot_width / 2, thickness + 0.002,
-                     (length - (slot_length - slot_width)) / 2, width / 2, -0.001)
-    cap_b = cylinder(slot_width / 2, thickness + 0.002,
+                          (width - slot_width) / 2, -1.0)
+    cap_a = cylinder(slot_width / 2, thickness + 2.0,
+                     (length - (slot_length - slot_width)) / 2, width / 2, -1.0)
+    cap_b = cylinder(slot_width / 2, thickness + 2.0,
                      (length - (slot_length - slot_width)) / 2 + (slot_length - slot_width),
-                     width / 2, -0.001)
+                     width / 2, -1.0)
     slot = union(slot_rect, cap_a)
     slot = union(slot, cap_b)
     return subtract(strap, slot)
@@ -208,24 +208,22 @@ def _tessellate_edges(shape: TopoDS_Shape, deflection: float) -> list:
     return polylines
 
 
-def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
-    """Render shape to a PNG via VTK.
+_VIEW_CAMERAS = {
+    # (position_vec_normalized, up_vec)  — all in world axes
+    "iso":   ((0.8, -0.8, 0.6), (0.0, 0.0, 1.0)),
+    "front": ((0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+    "top":   ((0.0, 0.0, 1.0),  (0.0, 1.0, 0.0)),
+    "right": ((1.0, 0.0, 0.0),  (0.0, 0.0, 1.0)),
+}
 
-    Uses VTK's offscreen rendering (no display required) with proper
-    z-buffered hidden-surface removal, flat shading, and edge-only
-    feature-line overlay. Avoids matplotlib Poly3DCollection's painter
-    algorithm which produces tessellation artifacts.
-    """
+
+def _render_view(shape: TopoDS_Shape, view_name: str, size: int,
+                 tris, edge_polylines) -> "vtk.vtkImageData":
     import vtk
-    path.parent.mkdir(parents=True, exist_ok=True)
-    from eval.grader.compare_step import bbox
-    b = bbox(shape)
-    diag = max(b.diagonal, 1e-6)
-    tris = _tessellate_triangles(shape, diag * 0.002)  # denser tessellation for smoother curves
-    if not tris:
-        return
+    from eval.grader.compare_step import bbox as _bbox
+    b = _bbox(shape)
 
-    # Build a vtkPolyData from the triangle list.
+    # Build scene.
     points = vtk.vtkPoints()
     cells = vtk.vtkCellArray()
     for tri in tris:
@@ -237,18 +235,10 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     polydata.SetPoints(points)
     polydata.SetPolys(cells)
 
-    # Merge coincident vertices (the triangle list creates duplicates at
-    # every shared corner). Without this, normal smoothing can't recognize
-    # adjacent triangles as belonging to the same surface, and cylinders
-    # render as faceted polygons.
     cleaner = vtk.vtkCleanPolyData()
     cleaner.SetInputData(polydata)
-    cleaner.SetTolerance(1e-6)  # 1 micron — tight enough for mm-scale parts
+    cleaner.SetTolerance(1e-6)
     cleaner.Update()
-
-    # Smooth normals with a high feature angle so flat faces stay flat and
-    # only real CAD corners get a normal split. SplittingOn + feature angle
-    # of 45° gives round cylinders + sharp box edges.
     normals = vtk.vtkPolyDataNormals()
     normals.SetInputConnection(cleaner.GetOutputPort())
     normals.SetFeatureAngle(45.0)
@@ -260,7 +250,6 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
 
     mapper = vtk.vtkPolyDataMapper()
     mapper.SetInputConnection(normals.GetOutputPort())
-
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     prop = actor.GetProperty()
@@ -270,11 +259,6 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     prop.SetSpecular(0.08)
     prop.SetSpecularPower(15)
 
-    # Feature edges drawn from B-rep TopoDS_EDGE curves, NOT from tessellation
-    # diagonals. 10× finer deflection than the face mesh — edges are 1D and
-    # cheap to sample densely; the payoff is smooth circle / arc outlines
-    # (hole boundaries were reading as hexagons at coarser deflection).
-    edge_polylines = _tessellate_edges(shape, diag * 0.0005)
     edge_points = vtk.vtkPoints()
     edge_cells = vtk.vtkCellArray()
     for poly in edge_polylines:
@@ -298,21 +282,33 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     renderer.AddActor(edge_actor)
     renderer.SetBackground(1.0, 1.0, 1.0)
 
+    # View label as an overlay text in the top-left.
+    label = vtk.vtkTextActor()
+    label.SetInput(view_name.upper())
+    tp = label.GetTextProperty()
+    tp.SetFontSize(max(size // 24, 16))
+    tp.SetColor(0.15, 0.15, 0.20)
+    tp.SetBold(True)
+    label.SetDisplayPosition(10, size - max(size // 22, 18) - 10)
+    renderer.AddActor2D(label)
+
     window = vtk.vtkRenderWindow()
     window.SetOffScreenRendering(1)
     window.AddRenderer(renderer)
     window.SetSize(size, size)
 
-    # Isometric camera aimed at the body center.
     cx, cy, cz = (b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2, (b.zmin + b.zmax) / 2
+    diag = max(b.diagonal, 1e-6)
     d = diag * 2.2
+    dir_vec, up_vec = _VIEW_CAMERAS[view_name]
     cam = renderer.GetActiveCamera()
     cam.SetFocalPoint(cx, cy, cz)
-    cam.SetPosition(cx + d * 0.8, cy - d * 0.8, cz + d * 0.6)
-    cam.SetViewUp(0.0, 0.0, 1.0)
+    cam.SetPosition(cx + d * dir_vec[0], cy + d * dir_vec[1], cz + d * dir_vec[2])
+    cam.SetViewUp(*up_vec)
+    if view_name in ("front", "top", "right"):
+        cam.ParallelProjectionOn()
     renderer.ResetCameraClippingRange()
     renderer.ResetCamera()
-
     window.Render()
 
     w2i = vtk.vtkWindowToImageFilter()
@@ -320,10 +316,47 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     w2i.SetInputBufferTypeToRGB()
     w2i.ReadFrontBufferOff()
     w2i.Update()
-    writer = vtk.vtkPNGWriter()
-    writer.SetFileName(str(path))
-    writer.SetInputConnection(w2i.GetOutputPort())
-    writer.Write()
+    return w2i.GetOutput()
+
+
+def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
+    """Render shape as a 2×2 multi-view composite (iso + front + top + right).
+
+    Orthographic projections for front/top/right so dimensions can be
+    read off the image. Perspective (iso) for the hero view.
+    Composite is written to `path`. The filename keeps `_iso` for
+    backward-compat with the manifest, but the content is a 4-panel
+    montage.
+    """
+    from PIL import Image
+    import numpy as np
+    path.parent.mkdir(parents=True, exist_ok=True)
+    from eval.grader.compare_step import bbox
+    b = bbox(shape)
+    diag = max(b.diagonal, 1e-6)
+    tris = _tessellate_triangles(shape, diag * 0.002)
+    if not tris:
+        return
+    edge_polylines = _tessellate_edges(shape, diag * 0.0005)
+
+    panel = size // 2
+    panels: dict[str, Image.Image] = {}
+    for view in ("iso", "front", "top", "right"):
+        img_data = _render_view(shape, view, panel, tris, edge_polylines)
+        dims = img_data.GetDimensions()
+        arr = np.frombuffer(
+            img_data.GetPointData().GetScalars(), dtype=np.uint8
+        ).reshape(dims[1], dims[0], -1)
+        # VTK writes (0,0) at bottom-left; flip to image convention.
+        arr = np.flipud(arr).copy()
+        panels[view] = Image.fromarray(arr[:, :, :3])
+
+    composite = Image.new("RGB", (size, size), (255, 255, 255))
+    composite.paste(panels["iso"],   (0, 0))
+    composite.paste(panels["front"], (panel, 0))
+    composite.paste(panels["top"],   (0, panel))
+    composite.paste(panels["right"], (panel, panel))
+    composite.save(path)
 
 
 # ---------- brief specs ----------
@@ -346,7 +379,7 @@ SPECS: list[BriefSpec] = [
             "Place the corner at the origin with the long side along X."
         ),
         difficulty_tier="trivial",
-        build_fn=box, build_kwargs={"dx": 0.040, "dy": 0.030, "dz": 0.020},
+        build_fn=box, build_kwargs={"dx": 40.0, "dy": 30.0, "dz": 20.0},
     ),
     BriefSpec(
         brief_id="seed_02_cube_25",
@@ -354,7 +387,7 @@ SPECS: list[BriefSpec] = [
             "Build a 25 mm cube with one corner at the origin."
         ),
         difficulty_tier="trivial",
-        build_fn=box, build_kwargs={"dx": 0.025, "dy": 0.025, "dz": 0.025},
+        build_fn=box, build_kwargs={"dx": 25.0, "dy": 25.0, "dz": 25.0},
     ),
     BriefSpec(
         brief_id="seed_03_cylinder_d20_h30",
@@ -363,7 +396,7 @@ SPECS: list[BriefSpec] = [
             "Axis along the world Z, base on the XY plane centered on the origin."
         ),
         difficulty_tier="trivial",
-        build_fn=cylinder, build_kwargs={"r": 0.010, "h": 0.030},
+        build_fn=cylinder, build_kwargs={"r": 10.0, "h": 30.0},
     ),
     BriefSpec(
         brief_id="seed_04_plate_one_hole",
@@ -374,8 +407,8 @@ SPECS: list[BriefSpec] = [
         ),
         difficulty_tier="easy",
         build_fn=plate_with_hole,
-        build_kwargs={"plate_dx": 0.060, "plate_dy": 0.040, "plate_dz": 0.005,
-                      "hole_r": 0.004, "hole_x": 0.030, "hole_y": 0.020},
+        build_kwargs={"plate_dx": 60.0, "plate_dy": 40.0, "plate_dz": 5.0,
+                      "hole_r": 4.0, "hole_x": 30.0, "hole_y": 20.0},
     ),
     BriefSpec(
         brief_id="seed_05_plate_four_holes",
@@ -386,8 +419,8 @@ SPECS: list[BriefSpec] = [
         ),
         difficulty_tier="easy",
         build_fn=plate_with_four_holes,
-        build_kwargs={"dx": 0.080, "dy": 0.060, "dz": 0.006,
-                      "hole_r": 0.002, "margin": 0.010},
+        build_kwargs={"dx": 80.0, "dy": 60.0, "dz": 6.0,
+                      "hole_r": 2.0, "margin": 10.0},
     ),
     BriefSpec(
         brief_id="seed_06_washer",
@@ -396,7 +429,7 @@ SPECS: list[BriefSpec] = [
             "Axis along world Z, centered on origin."
         ),
         difficulty_tier="easy",
-        build_fn=washer, build_kwargs={"od": 0.030, "id_": 0.015, "h": 0.003},
+        build_fn=washer, build_kwargs={"od": 30.0, "id_": 15.0, "h": 0.003},
     ),
     BriefSpec(
         brief_id="seed_07_standoff",
@@ -406,7 +439,7 @@ SPECS: list[BriefSpec] = [
             "XY plane centered on origin."
         ),
         difficulty_tier="easy",
-        build_fn=standoff, build_kwargs={"od": 0.010, "id_": 0.004, "h": 0.025},
+        build_fn=standoff, build_kwargs={"od": 10.0, "id_": 4.0, "h": 25.0},
     ),
     BriefSpec(
         brief_id="seed_08_l_bracket",
@@ -417,7 +450,7 @@ SPECS: list[BriefSpec] = [
         ),
         difficulty_tier="medium",
         build_fn=l_bracket,
-        build_kwargs={"leg_length": 0.050, "leg_width": 0.030, "thickness": 0.005},
+        build_kwargs={"leg_length": 50.0, "leg_width": 30.0, "thickness": 5.0},
     ),
     BriefSpec(
         brief_id="seed_09_slotted_strap",
@@ -429,8 +462,8 @@ SPECS: list[BriefSpec] = [
         ),
         difficulty_tier="medium",
         build_fn=slotted_strap,
-        build_kwargs={"length": 0.060, "width": 0.020, "thickness": 0.004,
-                      "slot_length": 0.040, "slot_width": 0.008},
+        build_kwargs={"length": 60.0, "width": 20.0, "thickness": 4.0,
+                      "slot_length": 40.0, "slot_width": 8.0},
     ),
     BriefSpec(
         brief_id="seed_10_plate_with_hole_offset",
@@ -442,9 +475,9 @@ SPECS: list[BriefSpec] = [
         ),
         difficulty_tier="medium",
         build_fn=plate_with_hole,
-        build_kwargs={"plate_dx": 0.050, "plate_dy": 0.050, "plate_dz": 0.010,
-                      "hole_r": 0.006,
-                      "hole_x": 0.050 - 0.015, "hole_y": 0.050 - 0.015},
+        build_kwargs={"plate_dx": 50.0, "plate_dy": 50.0, "plate_dz": 10.0,
+                      "hole_r": 6.0,
+                      "hole_x": 50.0 - 15.0, "hole_y": 50.0 - 15.0},
     ),
 ]
 

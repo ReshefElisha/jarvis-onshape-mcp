@@ -54,8 +54,8 @@ def main() -> int:
     # Test 1: identity. Same box vs same box → composite 1.0.
     ref_path = tmp / "reference.step"
     agent_path = tmp / "agent_identity.step"
-    _make_box_step(ref_path, 0.040, 0.030, 0.020)
-    _make_box_step(agent_path, 0.040, 0.030, 0.020)
+    _make_box_step(ref_path, 40.0, 30.0, 20.0)
+    _make_box_step(agent_path, 40.0, 30.0, 20.0)
     r = score_step_pair(agent_path, ref_path)
     print(f"\n[identity] composite={r.composite:.4f}  (expect 1.0)")
     for name, layer in r.layers.items():
@@ -67,8 +67,8 @@ def main() -> int:
     # (topology matches), L4 fail (IoU = 0, no overlap), L5 skipped.
     # Composite = 0.15 + 0.15 + 0.15 = 0.45.
     agent_moved = tmp / "agent_translated.step"
-    _make_translated_box_step(agent_moved, 0.040, 0.030, 0.020,
-                              tx=1.0, ty=0.0, tz=0.0)  # moved 1 meter in x
+    _make_translated_box_step(agent_moved, 40.0, 30.0, 20.0,
+                              tx=1000.0, ty=0.0, tz=0.0)  # moved 1 m = 1000 mm in x
     r2 = score_step_pair(agent_moved, ref_path)
     print(f"\n[translated] composite={r2.composite:.4f}  (expect ~0.45)")
     for name, layer in r2.layers.items():
@@ -84,7 +84,7 @@ def main() -> int:
     # the volume-diff guard. Composite = 0.0 (L2 fails too since diagonal
     # changes by > 5%).
     agent_small = tmp / "agent_small.step"
-    _make_box_step(agent_small, 0.020, 0.015, 0.010)  # half-size in each axis
+    _make_box_step(agent_small, 20.0, 15.0, 10.0)  # half-size in each axis
     r3 = score_step_pair(agent_small, ref_path)
     print(f"\n[smaller] composite={r3.composite:.4f}  (expect 0.15; topology still OK)")
     # L3 passes: same box topology (6 faces, 12 edges, 8 verts, 1 solid).
