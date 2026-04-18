@@ -271,9 +271,10 @@ def render_iso_png(shape: TopoDS_Shape, path: Path, size: int = 800) -> None:
     prop.SetSpecularPower(15)
 
     # Feature edges drawn from B-rep TopoDS_EDGE curves, NOT from tessellation
-    # diagonals. This is the only reliable way to avoid mesh artifacts on
-    # flat faces.
-    edge_polylines = _tessellate_edges(shape, diag * 0.005)
+    # diagonals. 10× finer deflection than the face mesh — edges are 1D and
+    # cheap to sample densely; the payoff is smooth circle / arc outlines
+    # (hole boundaries were reading as hexagons at coarser deflection).
+    edge_polylines = _tessellate_edges(shape, diag * 0.0005)
     edge_points = vtk.vtkPoints()
     edge_cells = vtk.vtkCellArray()
     for poly in edge_polylines:
