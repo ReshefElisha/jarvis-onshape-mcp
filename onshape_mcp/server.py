@@ -3393,7 +3393,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             part_studio_name: Optional[str] = None
             try:
                 workspaces = await document_manager.get_workspaces(doc.id)
-                main_ws = next((w for w in workspaces if w.isMain), None) or (
+                # WorkspaceInfo uses `is_main` as the Python field name
+                # (aliased from Onshape's `isMain` JSON). Pydantic v2
+                # doesn't expose the alias as an attribute on the
+                # instance, so use the python name.
+                main_ws = next((w for w in workspaces if w.is_main), None) or (
                     workspaces[0] if workspaces else None
                 )
                 if main_ws:
