@@ -2180,6 +2180,33 @@ def _enum_specific_hints(error_message: Optional[str]) -> list[str]:
             "parametric binding silently drops."
         )
 
+    # SKETCH_SOLVE_FAILED / SKETCH_UNSOLVABLE_CONSTRAINT: the solver couldn't
+    # satisfy the constraint set. Onshape's API does NOT surface per-constraint
+    # diagnostics anywhere in the response (live-probed 2026-04-18; featureState
+    # is just WARNING with no detail, entity geometry is still the seed values).
+    # Best recovery is client-side bisection — remove half the added constraints
+    # via edit_sketch.removeIds, re-POST; binary search narrows the offender
+    # in log(N) turns. Typical culprits: mutually exclusive pairs (PARALLEL +
+    # PERPENDICULAR on same entity pair), redundant positional constraints
+    # (COINCIDENT chain over-specifying endpoints), or an arc whose endpoints
+    # are already pinned by tangent lines to different circles.
+    if ("SKETCH_SOLVE_FAILED" in error_message
+            or "SKETCH_UNSOLVABLE_CONSTRAINT" in error_message):
+        hits.append(
+            "SKETCH_SOLVE_FAILED / SKETCH_UNSOLVABLE_CONSTRAINT: Onshape's solver "
+            "couldn't satisfy the constraint set. Onshape's REST API does NOT "
+            "return per-constraint diagnostics — silence here is a platform "
+            "limit, not a missing feature. Recovery: use edit_sketch with "
+            "removeIds to bisect. Remove ~half the last-added constraint ids, "
+            "re-POST; whichever half regens is the safe half, repeat on the "
+            "failing half. Most common triggers: mutually exclusive pairs "
+            "(PARALLEL + PERPENDICULAR on the same pair of lines), redundant "
+            "positional constraints (COINCIDENT chain over-specifying endpoints), "
+            "or tangent lines forcing an arc into an impossible geometry. "
+            "Always give each addConstraint an explicit `id` so bisection is "
+            "tractable."
+        )
+
     return hits
 
 
