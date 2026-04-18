@@ -140,6 +140,12 @@ change — hub.center can slide ~1 mm when you retarget dimensions.
   to pin to the horizontal axis.
 - **Circle + arc seeds are required.** Onshape's solver needs a
   starting guess even when DIAMETER/RADIUS will drive final values.
+- **Arcs default to the short way.** `arc` specs take `start_angle`
+  and `end_angle` (degrees default; strings `"38 deg"` / `"1.5 rad"`
+  for explicit units). If the CCW sweep from start to end exceeds
+  180°, the builder silently swaps endpoints so the arc goes the
+  shorter way — matches Onshape UI's three-point-arc default. Need
+  the long way? Pass `"short_arc": false` on the arc entity.
 - **Entity IDs must be unique within a sketch.** Duplicate id → raise.
 - **Sub-point refs aren't validated.** `circle.start` makes no sense
   but the builder won't catch it; Onshape rejects at solve time.
