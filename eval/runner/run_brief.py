@@ -355,7 +355,7 @@ def run_brief(
     brief_id: str,
     variant_id: Optional[str] = None,
     out_root: Optional[Path] = None,
-    max_turns: int = 100,
+    max_turns: int = 150,
 ) -> dict:
     brief = _load_brief(brief_id)
     ref_step = MANIFEST_PATH.parent / brief["reference_step_path"]
@@ -410,7 +410,7 @@ def _cli() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--brief-id", required=True)
     p.add_argument("--variant-id", default=None, help="Variant id; omit for baseline.")
-    p.add_argument("--max-turns", type=int, default=100)
+    p.add_argument("--max-turns", type=int, default=150)
     args = p.parse_args()
     result = run_brief(
         brief_id=args.brief_id,

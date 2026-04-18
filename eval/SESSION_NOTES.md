@@ -192,3 +192,28 @@ Scoreboard:
 **Still need: medium-tier noise floor.** n=1 samples of each variant.
 With only 3 briefs per iteration and stdev likely ~0.04, we can't
 distinguish real gains from noise until we have repeats.
+
+## 2026-04-18 — noise floor + 100-turn cap was the real problem
+
+Ran v001 2× more for noise floor. Raw stdev: 0.054 (2σ = 0.109).
+That would wipe out v001's apparent gain. But inspecting the three runs:
+
+| run      | means | turns | notes |
+|----------|-------|-------|-------|
+| 77536557 | 0.196 | 68/76/73 | original |
+| 77540649 | 0.189 | 45/97/84 | clean repeat |
+| 77542569 | 0.098 | 48/101/100 | **hit 100-turn cap on 2 briefs** |
+
+The third run's 0.098 is almost entirely harness-caused: 2 of 3 briefs
+hit the 100-turn cap before exporting STEP → composite=0 for those. The
+cap is biting at the exact boundary where a brief "would have finished."
+
+Non-cap-hit noise floor: stdev 0.0046, 2σ = 0.0093. With that bound,
+**v001's +0.041 gain over baseline IS significant** (4× above noise).
+
+Fix: bumped max_turns default 100 → 150 everywhere (run_brief, run_eval_set,
+their CLI defaults). 50-turn headroom means less frequent cap-hits; the
+ones we still get are actually-stuck briefs, not just slow ones.
+
+**Keep v001 as best-of-breed.** Current best for mutation tree:
+  v001-plan-from-render (mean 0.193 over 2 clean runs)
