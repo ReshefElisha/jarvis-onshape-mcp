@@ -220,6 +220,10 @@ async def _run_agent(
         # each action. 8192 tokens is plenty for CAD-build reasoning.
         # SDK expects a dict shape, not a bare bool.
         thinking={"type": "enabled", "budget_tokens": 8192},
+        # NOTE: the CLI's `--thinking-display` only accepts "summarized" or
+        # "omitted" (not "full"), so ThinkingBlocks we receive have empty
+        # thinking text by design. Agent IS thinking — the gaps between tool
+        # calls are extended-thinking periods — we just can't log the text.
     )
 
     prompt_blocks = _compose_prompt(brief, agent_step_target)
