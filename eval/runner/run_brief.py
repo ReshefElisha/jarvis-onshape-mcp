@@ -249,6 +249,13 @@ async def _run_agent(
 
         if isinstance(message, AssistantMessage):
             turn_ix += 1
+            if turn_ix > max_turns:
+                # Belt-and-suspenders cap: the SDK's max_turns isn't reliably
+                # enforced across CLI versions. Hard-stop here so one runaway
+                # brief can't burn the whole budget.
+                _log("hard_turn_cap", {"turn": turn_ix, "cap": max_turns})
+                _live(f"t{turn_ix} ⛔ hard turn cap (max={max_turns})")
+                break
             for block in message.content:
                 btype = getattr(block, "type", None) or block.__class__.__name__
                 if btype in ("thinking", "ThinkingBlock"):
