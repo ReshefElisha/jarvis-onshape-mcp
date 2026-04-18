@@ -1,13 +1,23 @@
-# Heavy artifacts — track provenance in MANIFEST.json, not the bytes.
+# Cloned upstream dataset repos (DeepCAD / Text2CAD / CADPrompt source).
+# Large, track-free — regenerate via bootstrap if needed.
+datasets/deepcad-repo/
+datasets/text2cad-repo/
+datasets/cadprompt-repo/
+datasets/fusion360-repo/
+
+# Converted-STEP caches for the big external datasets.
 datasets/text2cad/raw/
 datasets/text2cad/samples/
 datasets/text2cad/step/
 datasets/cadprompt/raw/
 datasets/cadprompt/step/
-datasets/modelmania/step/
 
 # Per-run artifacts.
 runs/
 
 # Isolated eval venv.
 .venv/
+
+# The seed set (datasets/seed/) IS checked in — 10 parts × ~20 KB each,
+# small enough to track, so a cold clone can inspect before loop start.
+# Same for MANIFEST.json.

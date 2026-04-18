@@ -1,0 +1,110 @@
+{
+  "manifest_version": 1,
+  "n_briefs": 10,
+  "source_sets": [
+    "seed"
+  ],
+  "note": "Phase-0 seed set. 10 procedurally-generated simple parts. Expand with DeepCAD / CADPrompt conversions in later phases; bump manifest_version when you do.",
+  "briefs": [
+    {
+      "brief_id": "seed_01_box_40_30_20",
+      "brief_text": "Build a rectangular plate 40 mm long \u00d7 30 mm wide \u00d7 20 mm thick. Place the corner at the origin with the long side along X.",
+      "brief_text_hash": "1274ad3454b58fb2",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_01_box_40_30_20.step",
+      "reference_png_path": "seed/png/seed_01_box_40_30_20.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "trivial"
+    },
+    {
+      "brief_id": "seed_02_cube_25",
+      "brief_text": "Build a 25 mm cube with one corner at the origin.",
+      "brief_text_hash": "3de8556d5c9cd98d",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_02_cube_25.step",
+      "reference_png_path": "seed/png/seed_02_cube_25.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "trivial"
+    },
+    {
+      "brief_id": "seed_03_cylinder_d20_h30",
+      "brief_text": "Build a cylinder 20 mm in diameter and 30 mm tall. Axis along the world Z, base on the XY plane centered on the origin.",
+      "brief_text_hash": "daf54f78447d0ddc",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_03_cylinder_d20_h30.step",
+      "reference_png_path": "seed/png/seed_03_cylinder_d20_h30.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "trivial"
+    },
+    {
+      "brief_id": "seed_04_plate_one_hole",
+      "brief_text": "Mounting plate 60 mm \u00d7 40 mm \u00d7 5 mm thick, with a single 8 mm diameter through-hole in the center. Plate corner at the origin, long side along X, hole axis along Z.",
+      "brief_text_hash": "30ec5d0c1dfe7322",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_04_plate_one_hole.step",
+      "reference_png_path": "seed/png/seed_04_plate_one_hole.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "easy"
+    },
+    {
+      "brief_id": "seed_05_plate_four_holes",
+      "brief_text": "Mounting plate 80 mm \u00d7 60 mm \u00d7 6 mm thick, with four 4 mm diameter through-holes, one near each corner, 10 mm in from each edge. Plate corner at the origin.",
+      "brief_text_hash": "e77b7de4d5635d8e",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_05_plate_four_holes.step",
+      "reference_png_path": "seed/png/seed_05_plate_four_holes.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "easy"
+    },
+    {
+      "brief_id": "seed_06_washer",
+      "brief_text": "Washer: outer diameter 30 mm, inner diameter 15 mm, thickness 3 mm. Axis along world Z, centered on origin.",
+      "brief_text_hash": "e07502fd324e0202",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_06_washer.step",
+      "reference_png_path": "seed/png/seed_06_washer.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "easy"
+    },
+    {
+      "brief_id": "seed_07_standoff",
+      "brief_text": "Threaded-style standoff cylinder: outer diameter 10 mm, inner bore 4 mm through, total height 25 mm. Axis along world Z, base on the XY plane centered on origin.",
+      "brief_text_hash": "64667b1a86284504",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_07_standoff.step",
+      "reference_png_path": "seed/png/seed_07_standoff.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "easy"
+    },
+    {
+      "brief_id": "seed_08_l_bracket",
+      "brief_text": "L-bracket: two legs, each 50 mm long and 30 mm wide, joined at a right angle. Leg thickness 5 mm. One leg lies flat on the XY plane; the other rises along Z.",
+      "brief_text_hash": "df85ee316b6e4aaa",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_08_l_bracket.step",
+      "reference_png_path": "seed/png/seed_08_l_bracket.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "medium"
+    },
+    {
+      "brief_id": "seed_09_slotted_strap",
+      "brief_text": "Flat strap 60 mm long \u00d7 20 mm wide \u00d7 4 mm thick with a single centered slot along the length: slot is 40 mm long \u00d7 8 mm wide with fully-rounded ends (slot is a rectangle capped with two semicircles). Strap corner at the origin.",
+      "brief_text_hash": "4027cc59d9c31c30",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_09_slotted_strap.step",
+      "reference_png_path": "seed/png/seed_09_slotted_strap.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "medium"
+    },
+    {
+      "brief_id": "seed_10_plate_with_hole_offset",
+      "brief_text": "Rectangular plate 50 mm \u00d7 50 mm \u00d7 10 mm thick with a 12 mm diameter through-hole positioned 15 mm in from the +X edge and 15 mm in from the +Y edge (i.e., not centered). Plate corner at the origin.",
+      "brief_text_hash": "7ec4a7ee1691e2e5",
+      "brief_image_path": null,
+      "reference_step_path": "seed/step/seed_10_plate_with_hole_offset.step",
+      "reference_png_path": "seed/png/seed_10_plate_with_hole_offset.png",
+      "source_dataset": "seed",
+      "difficulty_tier": "medium"
+    }
+  ]
+}
