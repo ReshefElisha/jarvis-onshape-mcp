@@ -18,9 +18,37 @@ from typing import Optional
 
 from PIL import Image
 
+import math
+
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCP.IFSelect import IFSelect_RetDone
+from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf
+
 from eval.bootstrap_seed import render_iso_png, text_hash
 from eval.bootstrap_nist import rasterize_pdf
 from eval.grader.compare_step import bbox, load_step
+
+
+def _rotate_shape(shape, axis: str, degrees: float):
+    """Rotate a shape about one of the world axes through the origin."""
+    dir_map = {"X": (1.0, 0.0, 0.0),
+               "Y": (0.0, 1.0, 0.0),
+               "Z": (0.0, 0.0, 1.0)}
+    if axis not in dir_map:
+        raise ValueError(f"rotate_axis must be X|Y|Z, got {axis!r}")
+    trsf = gp_Trsf()
+    trsf.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(*dir_map[axis])),
+                     math.radians(degrees))
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+
+def _write_step(shape, path):
+    writer = STEPControl_Writer()
+    writer.Transfer(shape, STEPControl_AsIs)
+    status = writer.Write(str(path))
+    if status != IFSelect_RetDone:
+        raise IOError(f"STEP write failed: {path} status={status}")
 
 
 MM_DIR = Path(__file__).parent / "datasets" / "modelmania"
@@ -39,6 +67,11 @@ class MMPart:
     display_name: str
     drawing_source: Optional[str]  # filename in drawing_raw/, or None if missing
     views: tuple = ("iso", "front", "top", "right")
+    # Optional pre-render orientation fix. `rotate_axis` is 'X' | 'Y' | 'Z'
+    # (world); `rotate_deg` is the rotation magnitude. Applied before
+    # writing the normalized STEP + rendering.
+    rotate_axis: Optional[str] = None
+    rotate_deg: float = 0.0
 
 
 PARTS = [
@@ -52,10 +85,13 @@ PARTS = [
            "SolidWorks Model Mania 2019 – Phase 1",
            "mm_2019_phase1.png",
            views=("iso_flip", "front", "top", "right")),
+    # Rotate 180° about world X so the flange (previously hidden behind the
+    # yoke on the native orientation) faces the camera.
     MMPart("mm_2022_phase1", "Model Mania 2022 (Phase 1).stp",
            "SolidWorks Model Mania 2022 – Phase 1",
            "mm_2022_phase1.jpg",
-           views=("iso_flip", "front", "top", "right")),
+           views=("iso_flip", "front", "top", "right"),
+           rotate_axis="X", rotate_deg=180.0),
     MMPart("mm_2025_phase1", "Model Mania 2025 (Phase 1).stp",
            "SolidWorks Model Mania 2025 – Phase 1",
            "mm_2025_phase1.pdf"),
@@ -123,6 +159,11 @@ def main() -> int:
         step_out = OUT_STEP / f"{slug}.step"
         shutil.copy(src, step_out)
         shape = load_step(step_out)
+        if part.rotate_axis is not None:
+            shape = _rotate_shape(shape, part.rotate_axis, part.rotate_deg)
+            # Overwrite step_out so the rotated shape becomes the canonical
+            # reference — agent output will be graded against this orientation.
+            _write_step(shape, step_out)
         b = bbox(shape)
         iso_out = OUT_ISO / f"{slug}.png"
         print(f"[{slug}] {part.display_name}  "
