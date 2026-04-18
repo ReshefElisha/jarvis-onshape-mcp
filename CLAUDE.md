@@ -1,6 +1,40 @@
 # CLAUDE.md — autoresearch branch
 
-**Purpose of this file**: persist enough state across sessions (including after `/clear` and context compaction) that a cold Claude can pick up the AutoResearch-style self-improvement loop and make real progress without asking Shef to re-explain. Read this BEFORE touching anything. Then read `eval/README.md` and `scoreboard.jsonl`.
+**Purpose of this file**: persist enough state across sessions (including after `/clear`, context compaction, and cold-start fresh clones) that a Claude you've never seen before can pick up the AutoResearch-style self-improvement loop and make real progress without asking Shef to re-explain. Read this BEFORE touching anything. Then read `eval/README.md` and `scoreboard.jsonl`.
+
+---
+
+## Quickstart: your literal first 10 minutes
+
+```bash
+cd /Users/shef/projects/claude-onshape-mcp
+git checkout autoresearch                    # if not already there
+tail -1 eval/scoreboard.jsonl                # see if any baseline exists
+git log --oneline autoresearch -10           # recent activity
+
+# If scoreboard is empty and no eval/bootstrap.py exists → you're in Phase 0.
+# Read eval/README.md § "Phase 0 checklist" and start there.
+
+# Sanity check: does the product MCP work in this checkout?
+uv sync
+uv run onshape-mcp < /dev/null &             # should print nothing + hang — kill it
+# If no .env file: ask Shef for ONSHAPE_API_KEY + ONSHAPE_API_SECRET.
+# Put them in .env (gitignored) like:
+#   ONSHAPE_API_KEY=...
+#   ONSHAPE_API_SECRET=...
+
+# Trace how a CAD build actually runs so you understand the runner boundary.
+less tools/agent_sdk_loop.py                 # read it in full, ~250 lines
+
+# Read the research record + open questions.
+cat eval/SESSION_NOTES.md
+```
+
+Key facts a cold session should internalize in these 10 minutes:
+- This branch (`autoresearch`) edits the **prompt surface** (SKILL.md et al.). It DOES NOT touch `onshape_mcp/` product code. Never.
+- The sketch-constraints branch is a product PR (#1, unrelated to this work). Don't merge it here. Don't rebase onto it. Leave it alone.
+- Scratchpad of prior dogfood reports lives in a DIFFERENT directory: `/Users/shef/projects/onshape-mcp/scratchpad/`. Read it ONCE for context (peer reports, design docs) if you want, but the canonical AutoResearch state is here.
+- Onshape API has rate limits. One brief build ≈ 5–15 min wall clock + dozens of API calls. A 50-brief run takes ~hours and burns real quota. Don't surprise Shef.
 
 ---
 
@@ -70,7 +104,7 @@ What DOES NOT get researched in the loop:
 - **Noise-driven keeps**: with small eval sets, a 1-brief flip can dominate. Counter: require aggregate delta > noise floor (measured from 3 repeat runs of the baseline). Save repeat-variance to scoreboard.
 - **Prompt injection via logs**: agent transcripts include tool_result blocks. Malicious content in an Onshape doc could instruct the next run. Counter: strip non-ASCII and tool-output from transcripts before they feed the meta-agent's mutation step.
 - **Early-step bias** (Karpathy calls this "5-min window bias"): the 50-turn cap over-weights sketches that succeed early. Counter: track per-brief turn count and flag if a mutation skewed the distribution even with unchanged aggregate.
-- **LLM-judge is NOT the grader**. Karpathy's silence on LLM-judge is pointed. We use it as a SECONDARY signal (qualitative rubric in `scoreboard.jsonl`) but never in the composite score. The composite is PythonOCC geometry, period.
+- **LLM-judge is NOT the grader**. Karpathy's silence on LLM-judge is pointed. We use it as a SECONDARY signal (qualitative rubric in `scoreboard.jsonl`) but never in the composite score. The composite is OCP geometry, period.
 
 ---
 
@@ -79,9 +113,9 @@ What DOES NOT get researched in the loop:
 Three eval tiers, different purposes:
 
 ### Primary: Text2CAD (DFKI, NeurIPS 2024 Spotlight)
-- https://huggingface.co/datasets/SadilKhan/Text2CAD — CC BY-NC-SA 4.0 (non-commercial, OK for internal research).
+- Annotations repo: `https://github.com/SadilKhan/Text2CAD` — CC BY-NC-SA 4.0 (non-commercial, OK for internal research).
 - 170k models × 4 skill tiers of NL annotations. Built on DeepCAD (mined from Onshape).
-- Geometry ships as JSON sketch+extrude sequences. Convert to STEP via DeepCAD's `export2step.py`. **Do this conversion once, cache the STEPs, check them in (git-lfs if large).**
+- Geometry comes from DeepCAD (`https://github.com/rundiwu/DeepCAD`). Convert JSON sequences to STEP via DeepCAD's `export2step.py`. Do this conversion once, cache the STEPs, gitignore the bytes, track MANIFEST hashes.
 - Sample 30–50 expert-tier briefs for the v1 eval set. Mix of pure NL and NL+drawing.
 
 ### Held-out: CADPrompt
@@ -113,7 +147,7 @@ Layered comparator, `eval/grader/compare_step.py`. Each layer is a pass/fail gat
 
 Composite score = `Σ (weight_i × layer_i_passed)` ∈ [0, 1]. Hard fail (L0) → 0.0. Pass-all → 1.0.
 
-Stack: PythonOCC (OCP) for all booleans, mass/volume, mesh export. `trimesh` or `open3d` for Chamfer. **Pin versions in `eval/grader/requirements.txt` and hash-check on import** — any dep drift and the grader has changed, which means prior scoreboard entries are incomparable.
+Stack: `cadquery-ocp` (pip-installable OCP / OpenCascade binding) for all booleans, mass/volume, mesh export. `trimesh` for Chamfer. Pure pip in `eval/.venv`. **Pin versions in `eval/grader/requirements.txt` and hash-check on import** — any dep drift and the grader has changed, which means prior scoreboard entries are incomparable.
 
 ---
 

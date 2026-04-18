@@ -15,7 +15,9 @@ Shef asked for the pivot. Research done in parent session:
 - Model Mania — drawings public, solutions NOT. Hand-build a few.
 - Rejected: ABC, SketchGraphs, CAD-SIGNet, CADTalk, CAD-Llama — all wrong shape.
 
-**Grader design**: layered pass/fail stack using PythonOCC. L0 body exists → L1 volume ±5% → L2 bbox ±5% → L3 topology signature → L4 Boolean IoU ≥0.90 → L5 Chamfer distance ≤0.02×diag. Weights 0/0.15/0.15/0.15/0.35/0.20. Composite ∈ [0, 1].
+**Grader design**: layered pass/fail stack using `cadquery-ocp`. L0 body exists → L1 volume ±5% → L2 bbox ±5% → L3 topology signature → L4 Boolean IoU ≥0.90 → L5 Chamfer distance ≤0.02×diag. Weights 0/0.15/0.15/0.15/0.35/0.20. Composite ∈ [0, 1].
+
+**Dependency policy**: pure pip in `eval/.venv`. Datasets via direct `git clone` of source repos (DeepCAD, Text2CAD, CADPrompt). No other install steps.
 
 **Community leaderboard**: does not exist. We're building the first honest "LLM-agent → real CAD kernel → STEP" benchmark.
 
@@ -34,3 +36,7 @@ CLAUDE.md + eval/README.md now pinned. Directory scaffold in place. Next cold-se
 - License: Text2CAD is CC-BY-NC-SA. Commercial eventual? If so, we can keep Text2CAD-only for internal research but would need a commercial-clean set for public claims. Rebuild with Fusion360 Gallery + hand-curated NL annotations is the likely path.
 - Compute budget: each Onshape CAD build is ~5–15 min real wall clock. 50-brief run × 3 variants × N iterations adds up. Shef OK with the Onshape API rate burn?
 - Should Shef want visibility into the loop's progress without reading scoreboard.jsonl? Minimal dashboard (e.g. matplotlib-render to HTML every N iterations) is cheap to add later. Not Phase 0.
+
+## Rulings from Shef
+
+- **2026-04-18**: pip-only eval deps (`cadquery-ocp`). Datasets via direct `git clone`.
