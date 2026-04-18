@@ -1,0 +1,19 @@
+{
+  "eval_set_id": "eval_v1",
+  "note": "AutoResearch eval config. Early iterations should sample 2–3 briefs per mutation (fast evolution); periodic full-set runs validate that improvements generalize. Deterministic — any brief_id added/removed bumps eval_set_id and makes prior scoreboard entries incomparable.",
+  "per_iteration_sample_size": 3,
+  "per_iteration_sampling": "round_robin_by_difficulty_tier",
+  "full_validation_every_n_iterations": 10,
+  "full_set_brief_ids": [
+    "seed_04_plate_one_hole",
+    "seed_08_l_bracket",
+    "seed_09_slotted_strap",
+    "nist_ctc_01_envelope",
+    "nist_ftc_09_envelope",
+    "nist_ctc_04_drawing",
+    "mm_2019_phase1_envelope",
+    "mm_2026_jan_envelope",
+    "mm_2021_phase1_drawing",
+    "mm_2025_phase1_drawing"
+  ]
+}
