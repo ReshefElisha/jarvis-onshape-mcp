@@ -109,3 +109,34 @@ but easy-tier baseline is clearly at/near the ceiling. That's what
 Phase 3 was supposed to tell us. **Verdict: easy tier is effectively
 solved by baseline; promote to medium tier before running more
 baseline characterization.**
+
+## 2026-04-18 — v001 results + agent interview
+
+v001-plan-from-render on medium tier (3 NIST envelope briefs):
+- nist_ctc_04: 0.15 (no change from baseline 0.15)
+- nist_ctc_05: 0.29 (up from 0.17; volume within 0.67 L1 band)
+- nist_ftc_06: 0.15 (no change from baseline 0.15; volume now 2.18× ref, was under)
+- **mean 0.196** vs baseline 0.155 (+0.04, n=1, no noise floor → not yet significant)
+
+**Agent-interview findings (tool-call counts per brief):**
+- `describe_part_studio`: called only **1–2 times per brief** despite SKILL
+  doc telling agents to call it "after every feature". The agent builds
+  4–5 features end-to-end, then describes once near the end. That's the
+  single biggest missed lever — without intermediate feedback small
+  geometric errors compound and there's no path to catch them.
+- `Read` of STEP paths: still 5–7 per brief even in v001. These runs were
+  launched before my prompt-cleanup commit (d3898fc) that tells the agent
+  the harness auto-copies the STEP. Future runs will save ~4 turns/brief.
+- `ToolSearch`: 3–5 per brief. Agent repeatedly looks up Bash (disallowed)
+  and tool schemas. Some of this is legit; Bash-escape is not.
+
+**Why v001 didn't help much**: the render-planning section told agents to
+list features before building but did not reinforce verify-after-each-feature.
+ctc_05 got volume closer because planning helped proportion estimation;
+ftc_06 got *farther* on volume because the agent enumerated features
+from the render and over-estimated their sizes with no feedback loop.
+
+**Next candidate mutation (v002)**: tighten describe_part_studio cadence
+to a strict "after every feature that adds/removes volume" and lay out
+what the agent should LOOK at in the output (bbox vs expectation, feature
+count vs plan, new faces vs previous count).
