@@ -433,3 +433,30 @@ iteration time toward 30+ min/brief.
 **This session: stopped iterating after v008 was killed. Recording all
 findings, leaving v001 as the only kept mutation, marking subsequent
 v002-v008 as either reverted or didn't-help.**
+
+## 2026-04-18→19 — final diagnostic: face-kind diff
+
+For ctc_05 (the brief where v001 helped most, 0.166 → 0.288):
+
+| face kind | reference | v001 build | delta |
+|-----------|-----------|------------|-------|
+| cylinder  | 67        | 16         | -51   |
+| plane     | 62        | 44         | -18   |
+| sphere    | 4         | 0          | -4    |
+| torus     | 6         | 0          | -6    |
+| cone      | 13        | 0          | -13   |
+| other     | 4         | 0          | -4    |
+
+Agent built 50% of planes but 24% of cylinders, ZERO fillets (torus),
+ZERO chamfers (cone), ZERO spherical features. The whole "rounded
+transition" surface family is missing.
+
+**Concrete future direction**: a "polish pass" SKILL section + tool —
+after the agent's primary build, it must enumerate edges and propose
+fillets/chamfers based on the reference. Even if the dimensions are
+slightly off, having torus/cone faces present would lift L3 topology
++ L4 IoU (more surface coverage in the cut/intersect).
+
+Combined with the OCR dim-extract harness pre-fill (v009's idea, just
+not tested due to API slowness tonight), this could be a productive
+v010 in a future session.
