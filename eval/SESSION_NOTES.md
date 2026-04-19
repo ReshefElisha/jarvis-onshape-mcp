@@ -501,3 +501,32 @@ hence eval/NEXT.md got a full pre-compaction handoff doc.
 **Plumbing to CAD still TODO** — vision spec is saved to a file; the
 CAD runner does NOT yet prepend it to phase-2 prompts. Leave this
 until vision quality is validated.
+
+## 2026-04-19 01:48 — the decoupling test result: CAD is solved, vision is the wall
+
+v011-handcrafted-spec on mm_2025_phase1_envelope:
+- User (Shef) wrote a plain-English spec by hand in scratchpad/mm_2025_human_description.txt
+- Runner injects it as authoritative VISION REPORT, agent skips Phase 1
+- Result: **composite = 1.000. L1 L2 L3 L4 L5 ALL = 1.0.**
+- 57 turns, 392s, 5 sketch + 5 extrude + 1 fillet + 2 compare_to_reference
+- Agent volume 345109 mm³ vs ref 345084 mm³ (0.007% diff)
+
+Comparison: baseline/v001-v008 on medium tier all cluster at 0.15-0.30 composite.
+Hand-written spec → 1.000 composite.
+
+**The bottleneck is not CAD execution. It's vision decomposition.** Opus
+4.7 can execute a correct build from a clean human-grade spec. Everything
+we've been doing (render-compare, dim-crosscheck, OCR, compare_to_reference
+tool, grader rotation invariance, etc.) was fighting the wrong wall.
+
+Prioritization change: from here on, every effort goes to Phase 1 spec
+quality. If we can produce ~human-quality decompositions automatically,
+the scores come with them for free.
+
+Concrete implications:
+- v010's architecture (vision sub-skill → CAD) is directionally correct.
+  The vision skill just needs to be MUCH better than it currently is.
+- Investing in the CAD skill is low-ROI until Phase 1 is fixed.
+- A useful next experiment: side-by-side the Phase 1 vision output
+  (auto-generated) vs the hand-written spec for mm_2025, see what's
+  specifically missing or wrong. That gap IS the work to do.
