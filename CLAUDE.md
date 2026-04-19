@@ -1,6 +1,37 @@
 # CLAUDE.md — autoresearch branch
 
-**Purpose of this file**: persist enough state across sessions (including after `/clear`, context compaction, and cold-start fresh clones) that a Claude you've never seen before can pick up the AutoResearch-style self-improvement loop and make real progress without asking Shef to re-explain. Read this BEFORE touching anything. Then read `eval/README.md` and `scoreboard.jsonl`.
+**Purpose of this file**: persist enough state across sessions (including after `/clear`, context compaction, and cold-start fresh clones) that a Claude you've never seen before can pick up the self-improvement loop and make real progress without asking Shef to re-explain. Read this BEFORE touching anything. Then read `eval/README.md` and `scoreboard.jsonl`.
+
+---
+
+## ⚠️ Important: this is NOT vanilla Karpathy AutoResearch (Shef ruling 2026-04-18)
+
+The Karpathy `autoresearch` repo optimizes a **non-agentic** training loop where each iteration is **5 minutes of code execution**. That setting tolerates fast N+1 hyperparameter tweaks because cost is low.
+
+**Our setting is fundamentally different:**
+
+- Each iteration runs an LLM **agent** for ~10 minutes per brief × 3 briefs = **~30 minutes** real wall time. Onshape API quota burns alongside.
+- We're optimizing the **prompt + tool surface around an agent**, not weights or hyperparams.
+- A small SKILL.md word-tweak that costs 30 minutes to evaluate is **bad ROI** when noise floor is wide.
+
+**Implications for how to run the loop:**
+
+1. **Bias toward bigger architectural variations**, not surface-text edits. New MCP tools, new measurement loops, new dataset rebalancing. Each iteration must earn its 30 minutes.
+2. **A no-op variation is not free.** If your gut says "this might shave 0.02 off composite," skip it — the noise floor is wider than that.
+3. **Tool/MCP changes are first-class mutations.** Phase 5+ in the original plan put SKILL.md ahead of tool changes. **Reordered: feel free to touch onshape_mcp/ tool code at any phase if it unlocks a real capability.**
+4. **Datasets are not sacred.** If a tier saturates (easy) or is too brutal to be informative (NIST PMI hard), re-tier or rebalance. Bump manifest version when you do.
+5. **The single-scalar-metric rule still applies** — don't game the metric, but DO improve the grader if it's blind to a class of correctness (rotation invariance, scale-invariant shape, etc.). Bump grader version + regrade history.
+6. **Karpathy's "single-file mutation" discipline does NOT apply.** Combine multiple changes per variant if they're synergistic. Just describe them in the variant's `mutation_description`.
+
+Per-Shef framing: "the Karpathy autoloop is for non-agentic improvement (hyperparameters and code, it's running code not an agent) and is time-bound to 5min per iteration so we can't go 100% like karpathy here."
+
+Karpathy's load-bearing rules we DO keep:
+- LOCKED grader during a comparison batch (rev with discipline + regrade)
+- One scalar composite ordering runs
+- Variants that don't beat baseline by > noise floor get reverted
+- Always log mutations even if reverted — the variant tree is the research record
+
+---
 
 ---
 
