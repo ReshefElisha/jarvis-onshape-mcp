@@ -242,6 +242,12 @@ async def _run_agent(
         # "omitted" (not "full"), so ThinkingBlocks we receive have empty
         # thinking text by design. Agent IS thinking — the gaps between tool
         # calls are extended-thinking periods — we just can't log the text.
+        # Bump the SDK's stdout buffer well above its 1MB default. ImageContent
+        # blocks (load_local_image, compose_reference_comparison, etc.) come
+        # back base64-encoded and accumulate per turn; one of those alone can
+        # exceed 1MB on a complex part. 16MB gives headroom without risking
+        # runaway memory.
+        max_buffer_size=16 * 1024 * 1024,
     )
 
     prompt_blocks = _compose_prompt(brief, agent_step_target)
