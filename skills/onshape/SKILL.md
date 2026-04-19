@@ -3,9 +3,9 @@ name: onshape
 description: Protocols for driving Onshape CAD via the onshape-mcp plugin. Render-first and entity-first workflows, unit + coordinate conventions, iteration discipline, when to reach for FeatureScript, and the gotchas (REMOVE-on-face auto-flip, Variable Studios as separate elements, deterministic ID remapping). Load before building anything in Onshape — the plugin's MCP tool surface makes more sense with this doc in context.
 ---
 
-# Onshape MCP — Claude Skill Guide
+# Jarvis Onshape MCP — Claude Skill Guide
 
-Loaded as context for any Claude session driving the onshape-mcp plugin.
+Loaded as context for any Claude session driving the Jarvis Onshape MCP plugin.
 Encodes the protocols that keep CAD builds from silently failing. Short, imperative.
 
 ## Think out loud

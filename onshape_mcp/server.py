@@ -73,7 +73,7 @@ logger.add(
 # Claude a categorized tool index + gotchas up front so the first 10
 # turns aren't spent guessing tool names.
 _INSTRUCTIONS = """\
-Onshape MCP — drive real CAD. Tools are lazy-loaded (fetch schemas via
+Jarvis Onshape MCP — drive real CAD. Tools are lazy-loaded (fetch schemas via
 ToolSearch before calling). Use `describe_part_studio` as your verification
 loop after every mutation — it returns topology + multi-view renders in one
 call.
@@ -4856,7 +4856,7 @@ def main():
         # Check if reload is requested
         reload = "--reload" in sys.argv or os.getenv("MCP_RELOAD") == "true"
 
-        print(f"Starting Onshape MCP server in SSE mode on port {port}", file=sys.stderr)
+        print(f"Starting Jarvis Onshape MCP server in SSE mode on port {port}", file=sys.stderr)
         if reload:
             print("Auto-reload enabled - server will restart on code changes", file=sys.stderr)
             # When using reload, we need to pass the module path string

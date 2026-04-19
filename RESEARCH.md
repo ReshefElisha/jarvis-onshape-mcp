@@ -22,7 +22,7 @@ Same model, same MCP tools, same grader. The handcrafted spec wins by
 
 ## What we built
 
-The `claude-onshape-mcp` plugin gives Claude Opus 4.7 ~60 MCP tools to
+The Jarvis Onshape MCP plugin gives Claude Opus 4.7 ~60 MCP tools to
 drive Onshape: sketches, extrudes, fillets, mates, parametric variables,
 custom FeatureScript, multi-view rendering, entity discovery. Every
 mutating tool returns a structured truth (what changed, what warnings
@@ -180,8 +180,8 @@ CAD scores, because the conclusions are different.
 ## Reproduce
 
 ```
-git clone https://github.com/ReshefElisha/claude-onshape-mcp
-cd claude-onshape-mcp
+git clone https://github.com/ReshefElisha/jarvis-onshape-mcp
+cd jarvis-onshape-mcp
 git checkout autoresearch    # eval harness lives here
 python3.11 -m venv eval/.venv && source eval/.venv/bin/activate
 pip install cadquery-ocp trimesh numpy pytesseract

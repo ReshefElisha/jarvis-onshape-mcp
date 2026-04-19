@@ -1,10 +1,14 @@
-# Onshape MCP
+# Jarvis Onshape MCP
 
 Claude Code plugin that lets Claude drive real Onshape CAD: sketches, extrudes,
 fillets, mates, parametric iteration via Variable Studios, custom FeatureScript
 features. Every mutating tool returns a structured truth: what changed, what
 warnings the regenerator raised, and hints for the next move. Multi-view PNG
 renders come back as image content so Claude can actually see the part.
+
+Includes a vision-decomposition skill that walks Claude through reading an
+engineering reference image *before* building. See `RESEARCH.md` for the
+benchmark data behind that workflow.
 
 > "felt dramatically more like writing code than anything I've tried with an LLM CAD tool."
 
@@ -52,7 +56,7 @@ renders come back as image content so Claude can actually see the part.
 ## Install
 
 ```
-/plugin install github:ReshefElisha/claude-onshape-mcp
+/plugin install github:ReshefElisha/jarvis-onshape-mcp
 ```
 
 Claude Code will prompt you for:
@@ -155,8 +159,8 @@ docs to read.
 ## Development
 
 ```
-git clone https://github.com/ReshefElisha/claude-onshape-mcp
-cd claude-onshape-mcp
+git clone https://github.com/ReshefElisha/jarvis-onshape-mcp
+cd jarvis-onshape-mcp
 uv sync
 export ONSHAPE_API_KEY=...
 export ONSHAPE_API_SECRET=...

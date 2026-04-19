@@ -1,14 +1,15 @@
 {
-  "name": "onshape-mcp",
+  "name": "jarvis-onshape-mcp",
   "version": "1.1.0",
-  "description": "Let Claude drive real Onshape CAD \u2014 sketches, extrudes, fillets, mates, parametric iteration, FeatureScript custom features. Includes vision-decomposition skill (zoom-and-describe a reference image into a structured feature tree before building) and side-by-side reference comparison tool. Structured truth-telling on every mutation.",
+  "description": "Jarvis Onshape MCP \u2014 let Claude drive real Onshape CAD. Sketches, extrudes, fillets, mates, parametric iteration, FeatureScript custom features. Includes the vision-decomposition skill (zoom-and-describe a reference image into a structured feature tree before building) and side-by-side reference comparison tool. Structured truth-telling on every mutation.",
   "author": {
     "name": "Reshef Elisha",
     "url": "https://github.com/ReshefElisha"
   },
-  "repository": "https://github.com/ReshefElisha/claude-onshape-mcp",
+  "repository": "https://github.com/ReshefElisha/jarvis-onshape-mcp",
   "license": "MIT",
   "keywords": [
+    "jarvis",
     "onshape",
     "cad",
     "mcp",
