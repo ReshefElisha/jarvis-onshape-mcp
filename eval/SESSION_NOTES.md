@@ -364,3 +364,72 @@ What we have learned end-to-end:
    compare_to_reference at strategic checkpoints.
 3. Step back and add **MORE seed briefs** to lift the noise floor and
    give the loop more failure modes to mine.
+
+## 2026-04-18 — session wrap: pivot from autoresearch loop
+
+Bigger architectural moves made this session (per Shef ruling that this isn't
+vanilla 5-min-iter Karpathy):
+
+1. **CLAUDE.md** updated with the "this is not Karpathy" framing so future
+   sessions don't slavishly tweak SKILL.md.
+2. **MCP tool: `compare_to_reference`** — composites reference + agent build
+   into one image, annotated with bbox-mm.
+3. **MCP tool: `load_local_image`** — caches a filesystem image so the agent
+   can `crop_image` into it at native resolution.
+4. **MCP tool: `extract_drawing_dimensions`** — Tesseract OCR + grouping +
+   kind classification (length/radius/diameter/thread/angle/count).
+5. **Grader v5** — bbox-center alignment + 24-rotation-invariant L4/L5.
+6. **Dataset rebalance v3** — hard tier led by Model Mania, NIST PMI dropped
+   except one stretch brief. Per OCR diagnostic, NIST has 5-13 callouts/
+   drawing (mostly lengths) vs Model Mania's 17-34 with radii/threads/etc.
+   NIST PMI is genuinely too tortuous for agent eval.
+
+**End-state scoreboard (regraded with grader v5):**
+```
+medium baseline      : 0.155 (n=1)
+medium v001          : 0.193 (n=2 clean, KEPT)
+medium v002          : 0.189 (n=1, REVERTED)
+medium v003          : 0.155 (n=1, REVERTED)
+hard baseline        : 0.030 (n=1)
+hard v004            : 0.042 (n=1)
+hard v005            : 0.035 (n=1)
+hard v006            : 0.000 / 0.025 (broken; abandoned)
+hard v007 (skipped)
+hard v008            : did not complete (agent grinding 10+ min/turn
+                       on bloated context, killed)
+```
+
+**Honest read on direction:**
+
+- Easy tier saturated.
+- Medium tier: only v001 plan-from-render is meaningfully above noise. All
+  other variants in the noise band.
+- Hard tier: every variant 0.020-0.042. Vision-to-3D ceiling on single
+  iso/drawing renders is the wall — no SKILL or MCP-tool addition has
+  moved a brief past 0.08.
+
+**Why the loop is stalling**: the agent is bottlenecked on positional /
+scale inference from a single rendered view. We're optimizing prompts and
+tools around a vision-bottlenecked agent. Bigger architectural moves
+(more tools, more compare cycles) don't help the underlying inference
+gap and instead grow the context per turn, slowing the API and pushing
+iteration time toward 30+ min/brief.
+
+**Productive next directions (require bigger pivots, not more variants):**
+
+1. **Use the eval as a benchmark, not a self-improvement loop.** Lock the
+   dataset + grader, freeze the variant tree, ship the leaderboard so
+   any model+SKILL combo can be scored. Stop trying to crack hard tier
+   from this branch.
+2. **Multi-agent / decomposition.** Have one agent extract dims, another
+   plan, another build. Each gets a focused context. May fix the
+   bloated-context problem.
+3. **Test-time compute scaling.** Try N candidate builds per brief, score
+   each, keep the best. Higher cost but might unlock parts of the score
+   surface unreachable at N=1.
+4. **Wait for vision model improvements** — the bottleneck is the
+   underlying drawing-to-3D inference, not the prompt around it.
+
+**This session: stopped iterating after v008 was killed. Recording all
+findings, leaving v001 as the only kept mutation, marking subsequent
+v002-v008 as either reverted or didn't-help.**
