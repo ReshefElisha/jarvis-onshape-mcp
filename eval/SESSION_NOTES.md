@@ -530,3 +530,34 @@ Concrete implications:
 - A useful next experiment: side-by-side the Phase 1 vision output
   (auto-generated) vs the hand-written spec for mm_2025, see what's
   specifically missing or wrong. That gap IS the work to do.
+
+## 2026-04-19 02:30 — full 2×2: handcrafted vs auto Phase 1
+
+Clean apples-to-apples on Model Mania medium tier:
+
+| brief    | spec source  | composite | turns | elapsed |
+|----------|--------------|-----------|-------|---------|
+| mm_2025  | handcrafted  | **1.000** | 57    | 392s    |
+| mm_2025  | auto         | 0.533     | 147   | 2399s   |
+| mm_2021  | handcrafted  | **0.615** | 102   | 1628s   |
+| mm_2021  | auto         | 0.000     | 151   | 2683s   |
+| mm_2019  | auto         | 0.325     | 131   | 2786s   |
+
+**Key findings:**
+
+1. Handcrafted wins on both parts (mm_2025: 1.0 vs 0.53, mm_2021: 0.62
+   vs 0.0). mm_2025 wasn't "just easy" — auto with 147 turns of self-
+   correction only hit 0.53.
+2. mm_2021 auto = 0.0 because agent never reached export — burned all
+   151 turns on Phase 1 + building, hit cap before `export_part_studio`.
+3. Handcrafted runs are 4-7× faster (mm_2025: 392s vs 2399s; mm_2021:
+   1628s vs 2683s).
+
+Implication: auto Phase 1 is expensive enough in turns that complex
+briefs can't finish within the cap. Handcrafted both improves spec
+quality AND frees budget for Phase 2 + recovery.
+
+**Note**: v010 mm_2025 auto did catch its own pocket-shape error mid-
+build via compare_to_reference (Shef observed "Big discrepancy! The
+reference pocket has CONCAVE sides..."). The recovery loop works.
+Just needs more headroom.
