@@ -235,21 +235,27 @@ class ShadedViewManager:
         )
 
 
-def load_local_image(image_path: str) -> RenderedView:
-    """Read a PNG from disk, push into the image cache, return a RenderedView.
+def load_local_image(image_path: str, max_edge: int = 1568) -> RenderedView:
+    """Read a PNG from disk, cap long edge at `max_edge`, push into cache.
 
     Lets the agent pass a filesystem reference image (from the brief) to
-    `crop_image` for dimension-callout zoom-ins at native resolution. Without
-    this the drawing PNG lives only in the prompt as inline base64, and the
-    agent can't select a sub-region at original resolution to read tiny
-    numeric callouts.
+    `crop_image` for dimension-callout zoom-ins. Downsamples to `max_edge`
+    on the long side — Claude's many-image API rejects >2000px in any
+    dimension, so we stay comfortably under. Subsequent `crop_image` calls
+    operate on the (possibly-downsampled) cached copy.
     """
     from pathlib import Path
     p = Path(image_path)
     if not p.exists():
         raise FileNotFoundError(f"load_local_image: {image_path}")
-    png_bytes = p.read_bytes()
-    img = Image.open(io.BytesIO(png_bytes))
+    img = Image.open(p).convert("RGB")
+    if max(img.width, img.height) > max_edge:
+        scale = max_edge / max(img.width, img.height)
+        img = img.resize((int(img.width * scale), int(img.height * scale)),
+                         Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
     image_id = _put_image(
         png_bytes,
         meta={"source": {"kind": "local", "path": str(p.resolve())},
@@ -348,6 +354,17 @@ def compose_reference_comparison(
     for img in agent_imgs:
         composite.paste(img, (x, y))
         x += img.width
+
+    # Cap at 1568px long edge — Claude's many-image API rejects >2000 per
+    # dimension, and each compare_to_reference call stacks an ImageContent
+    # block in the conversation.
+    max_edge = 1568
+    if max(composite.width, composite.height) > max_edge:
+        scale = max_edge / max(composite.width, composite.height)
+        composite = composite.resize(
+            (int(composite.width * scale), int(composite.height * scale)),
+            Image.LANCZOS,
+        )
 
     buf = io.BytesIO()
     composite.save(buf, format="PNG")
