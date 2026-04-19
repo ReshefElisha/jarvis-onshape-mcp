@@ -125,6 +125,33 @@ def _compose_prompt(brief: dict, agent_step_target: Path) -> list[dict]:
             "side-by-side composite (reference on top, your build's views below) in "
             "a single ImageContent block. Use after each major feature."
         )
+
+    # Pre-compute OCR-extracted dim callouts for drawing briefs and stamp them
+    # into the prompt as text. Saves the agent ~3 tool-round-trips and keeps
+    # those dims in front of the agent's eyes from turn 1, avoiding the
+    # "agent never reads the drawing closely enough" failure mode that
+    # SKILL-only mutations couldn't crack.
+    if drawing_rel:
+        dp_drawing = MANIFEST_PATH.parent / drawing_rel
+        if dp_drawing.exists():
+            try:
+                from onshape_mcp.api.drawing_ocr import extract_callouts
+                callouts = extract_callouts(str(dp_drawing.resolve()))
+                if callouts:
+                    by_kind: dict[str, list[str]] = {}
+                    for c in callouts:
+                        by_kind.setdefault(c.kind, []).append(c.text)
+                    lines = ["", "PRE-EXTRACTED CALLOUTS from the attached drawing (Tesseract OCR; cross-check against the image for any that look wrong):"]
+                    for kind in ("length", "radius", "diameter", "thread", "angle", "count", "scale"):
+                        vals = by_kind.get(kind, [])
+                        if vals:
+                            lines.append(f"  {kind}: {vals}")
+                    text += "\n".join(lines)
+            except Exception:
+                # OCR is best-effort; if pytesseract is missing or the image
+                # isn't readable, just skip — the agent still has the image.
+                pass
+
     blocks.append({"type": "text", "text": text})
 
     # Attach drawing sheet (if this brief has one).
