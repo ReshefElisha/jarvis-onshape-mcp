@@ -235,6 +235,101 @@ class ShadedViewManager:
         )
 
 
+def compose_reference_comparison(
+    reference_image_path: str,
+    rendered_views: List[RenderedView],
+    label_ref: str = "REFERENCE",
+    label_agent: str = "YOUR BUILD",
+) -> RenderedView:
+    """Compose a side-by-side comparison: reference image on top, a row of agent
+    renders below. Caches the composite and returns a RenderedView.
+
+    The reference image is typically a multi-view engineering sheet (iso +
+    front + top + right) from the brief. Placing it directly above the
+    agent's fresh renders makes the diff obvious in a single ImageContent
+    block — the agent can see at a glance where features are missing or
+    misplaced.
+
+    Image scaling: the reference is resized to match the total width of the
+    agent-renders row (preserving aspect), so both rows share the same
+    horizontal extent.
+    """
+    from pathlib import Path
+    from PIL import ImageDraw, ImageFont
+
+    ref_path = Path(reference_image_path)
+    if not ref_path.exists():
+        raise FileNotFoundError(f"reference image not found: {reference_image_path}")
+
+    ref_img = Image.open(ref_path).convert("RGB")
+    if not rendered_views:
+        raise ValueError("compose_reference_comparison: need at least 1 rendered view")
+
+    # Agent row: concatenate rendered views horizontally at their native height.
+    agent_imgs = [Image.open(io.BytesIO(get_image(r.image_id))).convert("RGB")
+                  for r in rendered_views]
+    row_h = max(img.height for img in agent_imgs)
+    # Normalize each agent view to row_h keeping aspect ratio.
+    agent_imgs = [img if img.height == row_h
+                  else img.resize((int(img.width * row_h / img.height), row_h), Image.LANCZOS)
+                  for img in agent_imgs]
+    agent_row_w = sum(img.width for img in agent_imgs)
+
+    # Reference row: scale to agent_row_w.
+    ref_w = agent_row_w
+    ref_h = int(ref_img.height * ref_w / ref_img.width)
+    ref_img = ref_img.resize((ref_w, ref_h), Image.LANCZOS)
+
+    # Compose: labels strip + ref + labels strip + agent row.
+    label_h = 40
+    total_h = label_h + ref_h + label_h + row_h
+    composite = Image.new("RGB", (agent_row_w, total_h), "white")
+    draw = ImageDraw.Draw(composite)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
+    except Exception:
+        font = ImageFont.load_default()
+
+    draw.rectangle([(0, 0), (agent_row_w, label_h)], fill="#333333")
+    draw.text((16, 6), label_ref, fill="white", font=font)
+    composite.paste(ref_img, (0, label_h))
+
+    agent_label_y = label_h + ref_h
+    draw.rectangle([(0, agent_label_y), (agent_row_w, agent_label_y + label_h)],
+                   fill="#333333")
+    views_str = ", ".join(r.view for r in rendered_views)
+    draw.text((16, agent_label_y + 6), f"{label_agent}  ({views_str})",
+              fill="white", font=font)
+
+    x = 0
+    y = agent_label_y + label_h
+    for img in agent_imgs:
+        composite.paste(img, (x, y))
+        x += img.width
+
+    buf = io.BytesIO()
+    composite.save(buf, format="PNG")
+    out_bytes = buf.getvalue()
+    new_id = _put_image(
+        out_bytes,
+        meta={
+            "kind": "comparison",
+            "reference_path": str(ref_path),
+            "agent_views": [r.view for r in rendered_views],
+            "agent_image_ids": [r.image_id for r in rendered_views],
+            "width": composite.width,
+            "height": composite.height,
+        },
+    )
+    return RenderedView(
+        view="reference_vs_build",
+        image_id=new_id,
+        width=composite.width,
+        height=composite.height,
+        bytes=len(out_bytes),
+    )
+
+
 def crop_cached_image(
     image_id: str,
     x1: float,

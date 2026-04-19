@@ -40,6 +40,7 @@ from .api.measurements import MeasurementManager
 from .api.custom_features import CustomFeatureManager, DEFAULT_FS_VERSION
 from .api.rendering import (
     ShadedViewManager,
+    compose_reference_comparison,
     crop_cached_image,
     get_image,
     get_image_meta,
@@ -1674,6 +1675,40 @@ async def list_tools() -> list[Tool]:
                     "edges": {"type": "boolean", "default": True},
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="compare_to_reference",
+            description=(
+                "Render your current Part Studio at iso/top/front/right and COMPOSITE the "
+                "result directly under a reference image from disk. Returns a single side-"
+                "by-side PNG: reference on top, your build's 4 views on the bottom row, "
+                "both at the same horizontal extent so silhouettes line up visually. Use "
+                "this whenever you want to cross-check feature count / placement / "
+                "proportion against the brief's reference figure — it removes the need to "
+                "squint back and forth across separate images. The reference path you pass "
+                "is a filesystem path readable by the MCP server (typically the brief's "
+                "iso or drawing PNG)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string"},
+                    "referenceImagePath": {
+                        "type": "string",
+                        "description": "Absolute or cwd-relative filesystem path to the reference PNG.",
+                    },
+                    "views": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Views to render for the agent row. Default: iso,top,front,right.",
+                    },
+                    "width": {"type": "integer", "default": 800},
+                    "height": {"type": "integer", "default": 600},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "referenceImagePath"],
             },
         ),
         Tool(
@@ -4405,6 +4440,46 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"Render failed: {e}")]
+
+    elif name == "compare_to_reference":
+        try:
+            views = arguments.get("views") or ["iso", "top", "front", "right"]
+            rendered = await shaded_view_manager.render_part_studio_views(
+                document_id=arguments["documentId"],
+                workspace_id=arguments["workspaceId"],
+                element_id=arguments["elementId"],
+                views=views,
+                width=int(arguments.get("width", 800)),
+                height=int(arguments.get("height", 600)),
+            )
+            composite = compose_reference_comparison(
+                reference_image_path=arguments["referenceImagePath"],
+                rendered_views=rendered,
+            )
+            png = get_image(composite.image_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Comparison composite: reference `{arguments['referenceImagePath']}` "
+                        f"on top, your build's {len(rendered)} views ({', '.join(views)}) on the "
+                        f"bottom row. image_id={composite.image_id}, "
+                        f"{composite.width}x{composite.height}px. Scan for: (a) features in the "
+                        f"reference missing from your row, (b) your features in wrong positions "
+                        f"relative to reference, (c) proportions that don't match."
+                    ),
+                ),
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType="image/png",
+                ),
+            ]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"compare_to_reference: {e}")]
+        except Exception as e:
+            logger.exception("compare_to_reference failed")
+            return [TextContent(type="text", text=f"compare_to_reference failed: {e}")]
 
     elif name == "crop_image":
         try:

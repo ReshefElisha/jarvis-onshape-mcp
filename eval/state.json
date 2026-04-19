@@ -1,0 +1,10 @@
+{
+  "current_tier": "hard",
+  "tier_stable_iterations": 0,
+  "round_robin_cursor": {
+    "easy": 9,
+    "medium": 3,
+    "hard": 0
+  },
+  "iteration": 10
+}

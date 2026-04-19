@@ -96,6 +96,19 @@ def _compose_prompt(brief: dict, agent_step_target: Path) -> list[dict]:
     """
     blocks: list[dict] = []
 
+    # Compute the absolute reference-image path so the agent can pass it to
+    # the `compare_to_reference` tool. Prefer iso render (always present);
+    # fall back to drawing sheet. May be None if neither is set.
+    iso_rel = brief.get("reference_png_path")
+    drawing_rel = brief.get("brief_image_path")
+    ref_abs_path: Optional[str] = None
+    for rel in (iso_rel, drawing_rel):
+        if rel:
+            p = MANIFEST_PATH.parent / rel
+            if p.exists():
+                ref_abs_path = str(p.resolve())
+                break
+
     # Text goes first so the image(s) land under it in the agent's view.
     text = brief["brief_text"] + (
         "\n\n"
@@ -105,10 +118,16 @@ def _compose_prompt(brief: dict, agent_step_target: Path) -> list[dict]:
         "yourself. Extra Read/Write calls burn turns and pull the file contents "
         "into your context for no reason."
     )
+    if ref_abs_path:
+        text += (
+            f"\n\nREFERENCE IMAGE on disk: {ref_abs_path}\n"
+            "Pass this path to `compare_to_reference` (referenceImagePath) to get a "
+            "side-by-side composite (reference on top, your build's views below) in "
+            "a single ImageContent block. Use after each major feature."
+        )
     blocks.append({"type": "text", "text": text})
 
     # Attach drawing sheet (if this brief has one).
-    drawing_rel = brief.get("brief_image_path")
     if drawing_rel:
         dp = MANIFEST_PATH.parent / drawing_rel
         if dp.exists():
@@ -126,7 +145,6 @@ def _compose_prompt(brief: dict, agent_step_target: Path) -> list[dict]:
             })
 
     # Always attach the iso render so the agent has a 3D reference.
-    iso_rel = brief.get("reference_png_path")
     if iso_rel:
         ip = MANIFEST_PATH.parent / iso_rel
         if ip.exists() and (not drawing_rel or iso_rel != drawing_rel):
