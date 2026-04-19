@@ -1,0 +1,116 @@
+Based on my analysis of the drawing and the iso views, I have enough to produce the structured decomposition. The section A-A is drawn through the center of the part (x=35), and the teardrop-with-hole profile on the left of the section view is the left ear visible through the open cavity — the hatched region on the right is the actual material cross-section through the deck at the center plane.
+
+## OVERVIEW
+A shallow saddle/clamp bracket with two mounting lugs at each end (each pierced by a horizontal through-hole along the long axis) and a central counterbored hole through the top deck for an M6 button-head cap screw. Material: plain carbon steel.
+
+## ENVELOPE
+- X (length): 70 mm
+- Y (width): 24 mm
+- Z (height): ~30 mm (inferred from section; "2X 30" read as two 30-mm half-spans, not total; nearest confirmed clue is the teardrop right-view ≈1.25:1 proportion vs. the 24 width. Flag: uncertain)
+
+## FEATURE TREE
+
+F1: Base body (saddle bridge)
+  type: base-plate (extruded teardrop-like profile)
+  role: primary
+  size: 70 L × 24 W × ~30 H; cross-section is a teardrop with rounded end (2X R8) transitioning via R15 into a tapered pointed end
+  position: centered at origin
+  face: bottom open, top closed
+  orientation: extrusion axis along +X
+  count: 1
+  dim_source: drawing_callout (70, 24) + render_inferred (height)
+  notes: The end profile (RIGHT view) is teardrop-shaped — flat/rounded lobe at bottom (where lug hole lives), tapering upward to a pointed/narrow top. The top deck flattens where the CBORE lives.
+
+F2: Bottom U-shaped cavity (saddle opening)
+  type: pocket (through-pocket cut upward from the bottom)
+  role: subtractive
+  size: 50 mm wide at the bottom opening (in X direction), extends between the two end lugs; depth upward into body is most of the Z height
+  position: centered along X between the two lugs; spans the full Y width (the pocket is open on ±Y faces as well — it's really an inverted-U channel) — ACTUALLY, from the top view the red pocket outline is inside 24 Y, so the pocket walls close on ±Y; the opening is only on the –Z face
+  face: –Z (bottom) face of F1
+  orientation: pocket axis along +Z (removed from below)
+  count: 1
+  dim_source: drawing_callout (50)
+  notes: Side walls of the pocket are angled — the opening is 50 wide at the bottom face and narrower at the top (5° draft on each outer leg face — see F7). The R2 fillets all around this cavity are F8.
+
+F3: Top counterbored screw hole
+  type: counterbore
+  role: subtractive
+  size: Ø6.6 THRU + Ø11.5 × 3.3 deep counterbore (for M6 socket button-head cap screw)
+  position: center of top face — (X=35, Y=12)
+  face: +Z (top) face of F1
+  orientation: axis along –Z
+  count: 1
+  dim_source: drawing_callout
+  notes: "CBORE FOR M6 SOCKET BUTTON HEAD CAP SCREW" — use 3.3 mm counterbore depth literally.
+
+F4: End-lug through-holes
+  type: through-hole
+  role: subtractive
+  size: Ø10 mm, THRU each lug along X axis
+  position: one at each end lug; hole axis centered in the lug's teardrop (coincident with the R8 lobe center); Y position = center of part (Y=12); Z position = approximately at the rounded-lobe height of the teardrop (lower portion)
+  face: ±X end faces of F1 (holes enter the end face and exit into the cavity)
+  orientation: axis along X
+  count: 2 (one per end)
+  dim_source: drawing_callout (2X Ø10 THRU)
+  notes: Each hole passes THRU only its own lug into the internal cavity (not through the whole part). R8 lobe of the teardrop end profile is concentric with this hole.
+
+F5: 5° outward draft on outer leg faces
+  type: taper (draft)
+  role: cosmetic / geometric constraint baked into base body
+  size: 5° off vertical on each of the two outer leg flanks in the FRONT view
+  position: the two outer leg side walls (the faces of the bridge legs that face ±X in the drawing FRONT view — these are the –X face of the left lug region and the +X face of the right lug region)
+  face: ±X outer faces of the legs
+  orientation: flared wider at the bottom (–Z), narrower at the top
+  count: 2 (left and right legs, mirrored)
+  dim_source: drawing_callout (5°, twice)
+  notes: This draft defines how the 50 bottom opening widens relative to the top deck profile. Likely applied as a draft feature to the outer leg faces of F1, not as independent geometry.
+
+F6: R15 blend (teardrop side curve)
+  type: fillet (large blend that defines the sloped side of the teardrop end profile)
+  role: cosmetic / profile shape
+  size: R15
+  position: symmetric left/right on each end profile; connects the R8 lobe tangentially up to the narrower top of the teardrop
+  face: on the ±Y side faces of F1 — R15 is drawn in the end profile, so it lives as a swept radius along X
+  orientation: profile-level radius in YZ plane, swept along X
+  count: 2 per end profile (symmetric top and bottom? — actually the teardrop appears to have one R15 on each side of the teardrop, so 2 total per cross-section)
+  dim_source: drawing_callout (R15)
+  notes: This is part of the base body's end-profile sketch, not a separate feature operation.
+
+F7: R8 lobe radius at lug ends
+  type: fillet (part of end-profile sketch defining the rounded lobe around the Ø10 hole)
+  role: primary profile radius
+  size: R8 (×2 per end profile — top arc and bottom arc of the rounded lobe, if applicable, or the two tangent arcs forming the rounded end)
+  position: at the rounded lobe of each teardrop end profile (centered on the Ø10 hole axis)
+  face: ±Y and ±Z extremes of each lug's rounded end
+  orientation: in the YZ plane
+  count: "2X R8" per the callout → 2 per end profile; if the same profile is extruded (same both ends), 2 total
+  dim_source: drawing_callout
+  notes: Combined with the Ø10 hole (Ø10 bore inside an R8 lobe → 8-10/2 = 3 mm wall thickness around the hole at the lobe).
+
+F8: R2 internal fillets ("ALL RED FILLETS")
+  type: fillet
+  role: cosmetic / stress-relief
+  size: R2 on all edges colored red in the drawing
+  position: around the entire perimeter of the bottom U-cavity (F2) at both the top-interior corners (per FRONT view) and along all inside edges visible in the TOP and SECTION views; also appears to include the outer transition edges of the lug-to-deck intersection where red
+  face: all internal/concave edges of the bridge cavity, plus the visible red edges shown in the top and ISO views
+  orientation: edge-filet
+  count: continuous along the marked edges (many edges — effectively a global "fillet all red edges" operation)
+  dim_source: drawing_callout ("R2 ALL RED FILLETS")
+  notes: This is a global R2 fillet applied after the subtractive features. Apply to all red edges and nothing else.
+
+## RELATIONSHIPS
+- F2 (U-cavity pocket) is cut INTO F1 (base teardrop body) from the –Z face.
+- F3 (CBORE) is cut INTO F1 from the +Z face at the center; it goes THRU the top deck into the cavity F2.
+- F4 (×2 Ø10 end-lug holes) are cut INTO F1 from the ±X end faces along the X axis; they break into the cavity F2.
+- F5 (5° outward draft) is applied to the two outer leg flank faces of F1 (widens toward –Z).
+- F6 (R15) and F7 (R8) are radii of the end-profile SKETCH that defines F1 — not post-body operations.
+- F8 (R2 red fillets) are applied LAST, filleting all red-highlighted edges (primarily the inside edges of the F2 cavity and the transition edges where the legs meet the deck interior and where the lugs transition into the deck).
+
+## UNCERTAINTIES
+- **Total part height (Z)**: The drawing never calls out an overall height dimension in the FRONT view. The section "2X 30" could be: (a) 60 mm total part length reference (unlikely, 70 is already called out), (b) 60 mm total height, (c) 30 mm half-height from centerline on each side, or (d) "at each of 2 ends, the feature is 30 mm long." Best guess: the section shows the cut-plane-to-end-feature spans, with 2X 30 = 60 = total part height. But a 60 mm tall × 24 mm wide × 70 mm long bracket has unusual proportions relative to the iso render, which looks shallower. Flag for downstream: confirm total height.
+- **2X 22 and (3.3) in section A-A**: Best guesses — 22 is likely the distance from the Ø10 hole centerline down to the bottom outer tip of the teardrop (or up to the underside of the deck), and (3.3) is the CBORE depth shown as a reference in section. Both are ambiguous because the section view also contains profile lines for features beyond the cut plane.
+- **Orientation of the section view**: I interpreted the section as cut at x=35 (center), perpendicular to the 70 axis, with the teardrop on the left being the left-end lug visible through the open cavity and the hatched right being the deck cross-section. Alternative: the section could be an end-view representation rather than a cross-section at center. If downstream builder finds the section misinterpreted, swap accordingly.
+- **R15 location**: I placed R15 as the large outer curve of the teardrop side profile (between R8 lobe and narrow top). Could instead be a blend at the transition from the lug region into the main deck body when viewed in XZ.
+- **Whether F5 draft is a DRAFT feature or just geometric consequence**: The 5° could be applied as a SolidWorks "Draft" feature on the outer leg faces after extrusion, OR it could be baked into the FRONT-view sketch of the main body profile (if you sketch the part from the FRONT and extrude along Y). Both produce the same geometry. Downstream agent's choice.
+- **Interior cavity Y-extent**: The TOP view shows red fillets around a rectangular interior outline. I read this as the cavity being fully enclosed on ±Y (cavity walls present on both 24-faces) and open only on –Z. If the cavity is instead open on ±Y as well (a through-tunnel along Y), the red outline in the top view would still look similar. Best guess: closed on ±Y (saddle sidewalls are solid and the CBORE screw bottoms out above an internal pocket ceiling).
+- **Ø10 hole termination**: Assumed they terminate where they break into the bottom cavity (semi-blind from the outside, open at the cavity wall). If they're truly THRU the entire part (x=0 to x=70 as one continuous bore), the drawing "2X" would be redundant — most likely they are 2 separate holes, one per lug.

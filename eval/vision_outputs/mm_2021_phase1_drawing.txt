@@ -1,0 +1,139 @@
+I have enough data to produce the decomposition. The side elevation confirms: lug center at Z=42, tube top at Z=60, base thickness 20mm. Detail B confirms: lug profile is an R12 arc at 30° from centerline, with Ø9 THRU + Ø15×8 counterbore for an M8 SHCS. Bottom view shows the pocketed underside with 5mm typical wall thickness and R3 interior fillets. The clamp-lug is a split-clamp with a 3mm sawcut: one half is tapped M8×1.0 through Ø7, the other half is the Ø9 through + Ø15 counterbore — tightening the single M8 SHCS pinches the split onto whatever occupies the Ø50 bore.
+
+## OVERVIEW
+Split-clamp flange bracket: a scalloped square mounting plate with four corner bolt holes, a central through-bore cylindrical boss (clamping barrel), and a side pinch-lug split by a sawcut for clamping a shaft or tube inserted in the central bore.
+
+## ENVELOPE
+80 mm (X) × 80 mm (Y) × 60 mm (Z). Z is the tube axis (central-bore axis). The mounting plate occupies roughly Z = 0–20; the tube with its side lug occupies Z = 20–60. The lug extends past the nominal 80 mm Y footprint on one side (+Y), reaching out to Y ≈ 36 + R12 ≈ 48 from centerline.
+
+## FEATURE TREE
+
+F1: Base mounting plate
+  type: base-plate (profile sketch + extrude)
+  role: primary
+  size: 80 × 80 outline nominal, thickness 20 mm (Z = 0 to Z = 20). Profile is a square modified by four concave R75 arcs on each side (scalloping the edges inward) and four R12 rounds at the corners.
+  position: centered on tube axis; bolt-hole centers at (±40, ±40).
+  face: bottom face is the mounting face (Z = 0); top face (Z = 20) is the plate upper surface from which the tube rises.
+  orientation: plate normal along +Z
+  count: 1
+  dim_source: drawing_callout (80, 40, 4X R75, 4X R12)
+  notes: Perimeter shape is the outline you see in the FRONT / bolt-pattern view.
+
+F2: Central cylindrical boss / clamp barrel (tube)
+  type: boss
+  role: primary
+  size: Ø60 outer, height 60 mm from Z = 0 to Z = 60 (i.e. extends 40 mm above the top of F1).
+  position: concentric with part origin (tube axis = part Z-axis).
+  face: rises from the top face of F1 (and passes through F1).
+  orientation: axis along +Z
+  count: 1
+  dim_source: drawing_callout (Ø60, height 60)
+  notes: Fillet R3 where boss meets top of plate (red fillets).
+
+F3: Central through-bore
+  type: through-hole
+  role: subtractive
+  size: Ø50, runs the full Z height (0 to 60), i.e. through F2 and F1.
+  position: coaxial with F2
+  face: enters at +Z top of F2, exits at −Z bottom of F1
+  orientation: axis along Z
+  count: 1
+  dim_source: drawing_callout (Ø50)
+  notes: Wall thickness of the tube is (60−50)/2 = 5 mm, matching the "5 WALL THICKNESS TYP." note.
+
+F4: 4× corner through-holes
+  type: through-hole
+  role: subtractive
+  size: Ø14 THRU
+  position: (±40, ±40) from tube axis; pierce F1 from top face (Z = 20) to bottom face (Z = 0).
+  face: top face of F1
+  orientation: axis along Z
+  count: 4 (at the 4 corner bosses)
+  dim_source: drawing_callout (4X Ø14 THRU)
+  notes: Plain through-holes — no counterbore on these corner holes.
+
+F5: Bottom pocket / lightening cavity (lower-face material removal)
+  type: pocket
+  role: subtractive
+  size: Scoops material from the bottom face of F1 upward, leaving a floor / rib structure of 5 mm nominal wall thickness. The pocketed region is bounded by the perimeter rim (which follows the 4 R75 / 4 R12 outline offset inward by ~5 mm) and the central annular rim around F3 (annulus ≈ Ø50 inner to some outer Ø ≈ 60–65). Rib-to-floor inner corner fillets R3.
+  position: on bottom face (Z = 0) of F1
+  face: −Z face of F1
+  orientation: pocket depth along +Z
+  count: 1 (a single pocket-region that creates the rib/corner-boss pattern visible in the BOTTOM VIEW)
+  dim_source: drawing_callout (5 WALL THICKNESS TYP., R3 ALL RED FILLETS) + render_inferred for exact pocket depth
+  notes: Creates the four distinct "arm" bosses running from the central ring out to each corner bolt-hole boss, with four pockets between them. Pocket depth is NOT explicitly dimensioned — likely 15 mm (20 mm plate − 5 mm floor); dim_source here is partly render_inferred. See UNCERTAINTIES.
+
+F6: Side clamp-lug (pinch-bolt ear)
+  type: boss
+  role: primary
+  size: Semi-circular lug profile with R12 around the bolt axis; lug profile sweeps out from the tube tangentially at 30° (half-angle from lug centerline) back to the Ø60 tube wall. Bolt-axis-to-tube-axis distance is 36 mm.
+  position: on +Y (or +X, whichever side the drawing locates) side of F2; bolt-hole axis at (radius 36 from tube axis, Z = 42).
+  face: grows off the outer cylindrical surface of F2
+  orientation: lug bolt axis is horizontal (in XY-plane), perpendicular to tube Z-axis; lug extrudes along the same axis as the bolt hole.
+  count: 1
+  dim_source: drawing_callout (R12, 30°, 36, height 42)
+  notes: R3 fillets where the lug blends into the tube outer wall.
+
+F7: Sawcut (clamp slot)
+  type: slot
+  role: subtractive
+  size: 3 mm wide slot, cut horizontally through the full depth of F6 and inward through the F2 tube wall so it daylights into the Ø50 bore. Cut plane is parallel to the tube axis, passing through the lug bolt axis (i.e. the slot splits the lug exactly along its bolt axis, into a top half and a bottom half).
+  position: centered on Z = 42 (the lug bolt-hole Z); width 3 mm means Z = 40.5 to Z = 43.5.
+  face: cut enters from the outer face of F6 and runs radially inward all the way to the Ø50 bore (hence "Ø9 THRU TO SAWCUT" — the Ø9 bolt hole drops until it intersects this slot).
+  orientation: slot lies in the XY-plane at Z = 42, with its cut direction radially inward along the lug's X axis; its thickness is along Z.
+  count: 1
+  dim_source: drawing_callout (3 SAWCUT)
+  notes: This is the defining clamping feature — F8 and F9 are split between the two halves of F6 by this cut.
+
+F8: Lug bolt hole — counterbore side
+  type: counterbore
+  role: subtractive
+  size: Ø9 THRU with Ø15 × 8 deep counterbore (C'BORE FOR ANSI METRIC M8 SHCS). Through-hole runs from outer lug face down through the upper half of F6, into the sawcut (F7).
+  position: coaxial with lug bolt axis at (radial distance 36 from tube axis, Z = 42); enters from the outer tip face of the lug.
+  face: outer end-face of F6 (the face whose normal points radially outward along the lug's axis)
+  orientation: axis is radial (perpendicular to tube Z), along the lug centerline.
+  count: 1
+  dim_source: drawing_callout (Ø9 THRU TO SAWCUT, Ø15 ↓ 8)
+  notes: Only exists in the upper half of F6 (the side above the sawcut).
+
+F9: Lug tapped hole — M8 thread side
+  type: thread (tapped through-hole)
+  role: subtractive
+  size: Ø7 THRU tap drill, M8×1.0 TAP THRU
+  position: coaxial with F8 (same bolt axis, on the opposite side of the sawcut — i.e. the lower half of F6 below the sawcut). The tap hole continues the bolt path from the sawcut outward (if you consider the mating surface) — or equivalently, from the sawcut through the lower half of F6.
+  face: mating face of the lower lug half across the sawcut (hole is coaxial with F8)
+  orientation: axis is radial, same as F8
+  count: 1
+  dim_source: drawing_callout (Ø7 THRU, M8×1.0 TAP THRU; distance from tube axis 36)
+  notes: Together F7+F8+F9 form the split-clamp pinch-bolt: tightening one M8 SHCS (inserted through F8's counterbore, across F7's gap, into F9's threads) closes the sawcut and clamps whatever is in the Ø50 bore.
+
+F10: R3 fillets (all red fillets)
+  type: fillet
+  role: cosmetic (stress-relief / finishing)
+  size: R3
+  position: applied to the red-highlighted edges in the drawings: boss-to-plate junctions, lug-to-tube junctions, pocket-rib inner corners, perimeter-rim top/bottom edges, lug-surface blends. Explicitly noted "R3 ALL RED FILLETS."
+  face: various — see notes
+  orientation: n/a
+  count: many (all edges highlighted in red on the drawing)
+  dim_source: drawing_callout (R3 ALL RED FILLETS)
+  notes: Apply LAST, after all additive/subtractive features are built, so the radii wrap around intersections correctly.
+
+## RELATIONSHIPS
+- F2 (boss) is added ON TOP of F1 (base-plate), coaxial with origin.
+- F3 (Ø50 through-bore) is cut INTO F2+F1 together, along the full Z extent.
+- F4 (4× Ø14 corner holes) are cut INTO F1 at the 4 corners.
+- F5 (bottom pocket) is cut INTO F1 from the underside, creating the rib / corner-boss / perimeter-rim pattern; the pocket is bounded by the tube outer wall, the perimeter rim, and the four radial ribs leading to each corner boss.
+- F6 (clamp lug) is added ONTO F2's outer cylindrical wall.
+- F7 (3 mm sawcut) is cut INTO F6 and PARTIALLY INTO F2 (running through the tube wall into the bore).
+- F8 (Ø9 + Ø15 counterbore) is cut INTO the upper half of F6 (the half above F7).
+- F9 (M8×1.0 tapped hole) is cut INTO the lower half of F6 (the half below F7), coaxial with F8.
+- F10 (R3 fillets) are applied to all feature junctions highlighted red: F1↔F2, F2↔F6, F5 internal corners, F1 perimeter rim top edges, etc.
+
+## UNCERTAINTIES
+1. **F5 pocket depth not explicitly dimensioned.** "5 WALL THICKNESS TYP." clearly fixes the tube wall and likely the pocket floor, but the drawing does not give a direct "pocket depth" callout. Best inference: if the plate is 20 mm thick and the pocket floor is 5 mm thick, pocket depth is 15 mm (from bottom face, z = 0, up to z = 15). Downstream agent should assume this unless section A-A contradicts.
+2. **Perimeter rim outer shape vs pocket outer shape.** The pocket perimeter appears to follow the outer 80×80 / R75 / R12 outline offset inward by 5 mm — so the visible "rim" on the bottom is a uniform 5 mm wide strip. This is consistent with the bottom view but is partially render-inferred.
+3. **Four radial ribs run corner-to-center.** From the bottom view, each corner bolt-hole boss is connected to the central tube boss by a 5 mm thick straight rib. The exact rib width and whether the ribs are tangent to circles or straight is render_inferred; the drawing does not dimension them beyond "5 WALL THICKNESS TYP."
+4. **Lug 30° angle interpretation.** Detail B shows 30° as the half-angle between the lug centerline and the tangent line where the lug profile meets the Ø60 tube. I interpreted this as the angle defining where the R12 lug arc tangentially meets the tube's outer cylinder. If instead it is the full included angle (not half), the lug will be narrower than modeled — worth double-checking.
+5. **Lug side.** I assumed the clamp lug is on the +Y side based on the FRONT view orientation; the drawing does not mark a specific axis label. This is a rotation-about-Z choice and does not affect geometry.
+6. **M8×1.0 vs standard M8×1.25.** Drawing explicitly calls M8×1.0 (fine pitch). Do not substitute the more common M8×1.25.
+7. **Order of sawcut vs bolt holes vs fillets.** The Ø9 "THRU TO SAWCUT" language implies the sawcut is made first (or at least that the Ø9 bore terminates at the sawcut plane). Build order should be: lug boss → sawcut → counterbore hole → tapped hole → fillets. Inverting this will change edge geometry around the sawcut/bolt intersection.

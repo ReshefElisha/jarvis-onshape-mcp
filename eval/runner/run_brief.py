@@ -59,6 +59,7 @@ from eval.grader.rubric import score_step_pair
 
 MANIFEST_PATH = REPO / "eval" / "datasets" / "MANIFEST.json"
 DEFAULT_SKILL_PATH = REPO / "skills" / "onshape" / "SKILL.md"
+DEFAULT_VISION_SKILL_PATH = REPO / "eval" / "skills" / "vision" / "SKILL.md"
 SCOREBOARD_PATH = REPO / "eval" / "scoreboard.jsonl"
 GRADER_HASH_PATH = REPO / "eval" / "grader" / "GRADER_HASH"
 
@@ -72,7 +73,7 @@ def _load_brief(brief_id: str) -> dict:
 
 
 def _resolve_skill(variant_id: Optional[str]) -> str:
-    """Load the SKILL.md the agent will operate under.
+    """Load the CAD SKILL.md the agent will operate under.
 
     If `variant_id` is set, look for `variants/<variant_id>/skills/onshape/SKILL.md`;
     else fall back to the plugin's current skill.
@@ -82,6 +83,26 @@ def _resolve_skill(variant_id: Optional[str]) -> str:
         if p.exists():
             return p.read_text()
     return DEFAULT_SKILL_PATH.read_text()
+
+
+def _resolve_vision_skill(variant_id: Optional[str]) -> Optional[str]:
+    """Load the vision-decomposition SKILL.md the agent will operate under.
+
+    Variants can override at `variants/<variant_id>/skills/vision/SKILL.md`.
+    Returns None if the variant explicitly opts out by setting the file to
+    empty, or if no default vision skill exists.
+
+    The vision skill is independently evolvable — a variant can change ONLY
+    the vision phase without touching the CAD skill, and vice versa.
+    """
+    if variant_id and variant_id != "baseline":
+        p = REPO / "eval" / "variants" / variant_id / "skills" / "vision" / "SKILL.md"
+        if p.exists():
+            text = p.read_text().strip()
+            return text if text else None
+    if DEFAULT_VISION_SKILL_PATH.exists():
+        return DEFAULT_VISION_SKILL_PATH.read_text()
+    return None
 
 
 def _grader_hash() -> str:
@@ -225,16 +246,23 @@ async def _run_agent(
             f.write(f"{stamp} [{brief['brief_id']}|{variant_id or 'baseline'}] {line}\n")
 
     skill = _resolve_skill(variant_id)
-    system = (
+    vision_skill = _resolve_vision_skill(variant_id)
+    base = (
         "You are an engineering CAD designer driving Onshape through MCP tools.\n"
-        "First call create_document + create_part_studio to set up a fresh "
-        "workspace. Thread (documentId, workspaceId, elementId) through every "
-        "subsequent tool call.\n"
-        "Iterate: propose feature → call tool → describe_part_studio to verify "
-        "→ fix or proceed. When the part matches the brief, export STEP and "
-        "write it to disk per the user's instructions.\n"
-        "Protocol (follow strictly):\n\n" + skill
+        "Two-phase workflow:\n"
+        "  PHASE 1 (vision decomposition) — follow the VISION SKILL below. "
+        "Decompose the reference image(s) into a structured feature tree. "
+        "Do NOT call any Onshape mutation tool (create_*, update_*, delete_*, "
+        "export_*) during Phase 1.\n"
+        "  PHASE 2 (CAD build) — after Phase 1, follow the CAD SKILL below. "
+        "Call create_document + create_part_studio, build to the Phase 1 spec, "
+        "export STEP, reply DONE.\n"
+        "Protocols (follow strictly):\n"
     )
+    if vision_skill:
+        base += "\n===== VISION SKILL (Phase 1) =====\n" + vision_skill + "\n"
+    base += "\n===== CAD SKILL (Phase 2) =====\n" + skill
+    system = base
 
     mcp_env: dict[str, str] = {}
     for name in ("ONSHAPE_ACCESS_KEY", "ONSHAPE_SECRET_KEY",

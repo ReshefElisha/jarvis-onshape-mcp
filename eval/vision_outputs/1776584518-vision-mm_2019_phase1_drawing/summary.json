@@ -1,0 +1,7 @@
+{
+  "brief_id": "mm_2019_phase1_drawing",
+  "turns": 24,
+  "elapsed_s": 552.0,
+  "final_spec_chars": 10156,
+  "final_spec_path": "eval/vision_outputs/mm_2019_phase1_drawing.txt"
+}
