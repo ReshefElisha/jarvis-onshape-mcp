@@ -45,6 +45,7 @@ from .api.rendering import (
     get_image,
     get_image_meta,
     list_cached_image_ids,
+    load_local_image,
 )
 from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
@@ -1675,6 +1676,27 @@ async def list_tools() -> list[Tool]:
                     "edges": {"type": "boolean", "default": True},
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="load_local_image",
+            description=(
+                "Read a PNG from disk (e.g. the brief's reference drawing) into "
+                "the image cache so you can crop_image into it at native resolution. "
+                "Returns image_id + dimensions. Without this, the reference image "
+                "lives only in the prompt as inline base64 — no way to zoom into a "
+                "dimension callout. Use this ONCE per brief on the reference path "
+                "you were given, then crop_image to read small text."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "imagePath": {
+                        "type": "string",
+                        "description": "Filesystem path to a PNG readable by the MCP server.",
+                    },
+                },
+                "required": ["imagePath"],
             },
         ),
         Tool(
@@ -4440,6 +4462,31 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"Render failed: {e}")]
+
+    elif name == "load_local_image":
+        try:
+            rv = load_local_image(arguments["imagePath"])
+            png = get_image(rv.image_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Loaded {arguments['imagePath']} ({rv.width}x{rv.height}px, "
+                        f"{rv.bytes} bytes). image_id={rv.image_id}. "
+                        f"You can now crop_image on this id to zoom into callouts."
+                    ),
+                ),
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType="image/png",
+                ),
+            ]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"load_local_image: {e}")]
+        except Exception as e:
+            logger.exception("load_local_image failed")
+            return [TextContent(type="text", text=f"load_local_image failed: {e}")]
 
     elif name == "compare_to_reference":
         try:

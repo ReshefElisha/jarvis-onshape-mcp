@@ -235,6 +235,35 @@ class ShadedViewManager:
         )
 
 
+def load_local_image(image_path: str) -> RenderedView:
+    """Read a PNG from disk, push into the image cache, return a RenderedView.
+
+    Lets the agent pass a filesystem reference image (from the brief) to
+    `crop_image` for dimension-callout zoom-ins at native resolution. Without
+    this the drawing PNG lives only in the prompt as inline base64, and the
+    agent can't select a sub-region at original resolution to read tiny
+    numeric callouts.
+    """
+    from pathlib import Path
+    p = Path(image_path)
+    if not p.exists():
+        raise FileNotFoundError(f"load_local_image: {image_path}")
+    png_bytes = p.read_bytes()
+    img = Image.open(io.BytesIO(png_bytes))
+    image_id = _put_image(
+        png_bytes,
+        meta={"source": {"kind": "local", "path": str(p.resolve())},
+              "width": img.width, "height": img.height},
+    )
+    return RenderedView(
+        view=f"local:{p.name}",
+        image_id=image_id,
+        width=img.width,
+        height=img.height,
+        bytes=len(png_bytes),
+    )
+
+
 def compose_reference_comparison(
     reference_image_path: str,
     rendered_views: List[RenderedView],
