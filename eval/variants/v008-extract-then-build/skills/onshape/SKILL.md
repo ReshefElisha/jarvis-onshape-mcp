@@ -31,43 +31,12 @@ a 30-second visual plan is repaid many times over in fewer `update_feature`
 revisions. When envelope numbers in the brief conflict with what the render
 shows, trust the render and leave a note — don't silently fit the number.
 
-## Drawings: extract dimensions BEFORE building
+## Drawings: extract dimensions first
 
-If the brief includes an engineering drawing PNG (a `referenceImagePath` in
-your prompt), reading tiny dimension callouts from the inline-base64
-attachment is unreliable — text often renders at 8-12 px after multi-image
-downsampling and your vision pass misses or hallucinates digits.
-
-Two MCP tools shortcut this:
-
-1. **`mcp__onshape__extract_drawing_dimensions(imagePath=<refPath>)`** runs
-   Tesseract OCR on the drawing and returns every numeric callout it finds,
-   grouped by kind:
-   - `length`: bare numbers (40, 80, 36)
-   - `radius`: R-prefix (R3, R12, R75)
-   - `diameter`: Ø-prefix (often misread by OCR as "9X" — cross-check)
-   - `thread`: M-prefix (M8, M8X1.0)
-   - `angle`: degree-suffix (30.0°)
-   - `count`: NX-prefix (4X, 2X)
-   Each callout includes pixel position so you can map it to a feature.
-2. **`mcp__onshape__crop_image`** (after `load_local_image` to cache the
-   reference) lets you zoom into a callout at native resolution if the OCR
-   missed it or got it wrong.
-
-Workflow on a drawing brief:
-
-```
-1. extract_drawing_dimensions(refPath)
-   → table of all callouts. Write down which numbers are envelope dims,
-     hole diameters, thread sizes, angles.
-2. (optional) load_local_image(refPath) + crop_image into ambiguous regions
-   to verify any OCR miss before committing to a value.
-3. Plan + count features as in the section above.
-4. create_document; build to the extracted dimensions.
-```
-
-The OCR is more reliable than your visual reading of small text. Use it
-first, vision-verify second.
+For a drawing brief, call `extract_drawing_dimensions(imagePath=<refPath>)`
+once before estimating any size. Tesseract OCR returns every numeric
+callout (length, radius, diameter, thread, angle) grouped by kind — way
+more reliable than reading 8-12 px text yourself.
 
 ## Units
 
