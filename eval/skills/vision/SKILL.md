@@ -57,6 +57,23 @@ List them as one-liners: "F4 (through-hole) is cut INTO F1 (base-plate)."
 Anything you weren't sure about. Be explicit — downstream agent relies on this.
 ```
 
+## Think out loud as you work
+
+Before every non-trivial tool call (crop_image, load_local_image), emit a
+short plan text (1-3 sentences, plain assistant output) saying **WHY** and
+**WHAT YOU EXPECT TO SEE**. Example:
+
+> *"About to crop the top-left quadrant of the drawing — that's where the
+> dimension callouts for the main bolt circle usually live on ASME title
+> sheets. Expecting to see two Ø dimensions."*
+
+The observer watching the run uses these thought lines to follow your
+reasoning. Don't let your only visible output be tool-call JSON.
+
+After each crop, also say in 1-2 sentences **what you actually saw** before
+moving on. If the crop didn't show what you expected, name the surprise
+explicitly — that's valuable signal.
+
 ## How to work
 
 Mandatory steps, in order:

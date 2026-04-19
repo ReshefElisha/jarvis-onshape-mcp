@@ -21,3 +21,4 @@ runs/
 # The seed set (datasets/seed/) IS checked in — 10 parts × ~20 KB each,
 # small enough to track, so a cold clone can inspect before loop start.
 # Same for MANIFEST.json.
+live_images/

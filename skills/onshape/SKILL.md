@@ -8,6 +8,23 @@ description: Protocols for driving Onshape CAD via the onshape-mcp plugin. Rende
 Loaded as context for any Claude session driving the onshape-mcp plugin.
 Encodes the protocols that keep CAD builds from silently failing. Short, imperative.
 
+## Think out loud
+
+Before every non-trivial tool call (sketch, extrude, boolean, fillet,
+chamfer, describe, export), emit a short plan text (1-3 sentences, plain
+assistant output) saying **WHY** you're making this call and **WHAT you
+expect to see / build**. Example before an extrude:
+
+> *"Extruding the base rectangle 30 mm up. Expect a flat plate with the
+> four corner arcs intact, bbox (500, 780, 30)."*
+
+After each result, also say 1-2 sentences about **what actually happened**
+— especially if the result surprised you. If a describe_part_studio shows
+a feature at the wrong Z, name that out loud before deciding how to fix.
+
+Don't let your only visible output be tool-call JSON. The observer watching
+the run relies on these thought lines to catch bugs in your reasoning.
+
 ## Units
 
 Onshape's API works in meters. Two safe ways to pass lengths:

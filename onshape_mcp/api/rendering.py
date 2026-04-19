@@ -54,10 +54,31 @@ _IMAGE_META: Dict[str, Dict[str, Any]] = {}
 
 
 def _put_image(png_bytes: bytes, meta: Dict[str, Any]) -> str:
-    """Insert a PNG into the cache and return a stable image_id."""
+    """Insert a PNG into the cache and return a stable image_id.
+
+    If the env var `ONSHAPE_MCP_MIRROR_IMAGES_DIR` is set (typically by the
+    eval harness), also writes the PNG to that directory as
+    `<image_id>.png`. Lets an external observer inspect exactly what the
+    agent saw after each render/crop — look up the image_id from live.log
+    and `open eval/live_images/<image_id>.png`.
+    """
+    import os
     image_id = "img_" + hashlib.sha256(png_bytes).hexdigest()[:16]
     _IMAGE_CACHE[image_id] = png_bytes
     _IMAGE_META[image_id] = meta
+
+    mirror_dir = os.environ.get("ONSHAPE_MCP_MIRROR_IMAGES_DIR")
+    if mirror_dir:
+        try:
+            from pathlib import Path
+            p = Path(mirror_dir)
+            p.mkdir(parents=True, exist_ok=True)
+            out = p / f"{image_id}.png"
+            if not out.exists():
+                out.write_bytes(png_bytes)
+        except Exception:
+            # Best-effort — don't let mirror failures break real work.
+            pass
     return image_id
 
 

@@ -131,6 +131,11 @@ async def _run_vision(brief: dict, out_dir: Path, max_turns: int = 30) -> dict:
     for name in ("PATH", "HOME", "ONSHAPE_API_KEY", "ONSHAPE_API_SECRET"):
         if os.getenv(name):
             mcp_env[name] = os.environ[name]
+    # Mirror every cached image to disk. Lets Shef `open
+    # eval/live_images/<image_id>.png` for any image_id he sees in
+    # vision_live.log.
+    mirror_dir = str((REPO / "eval" / "live_images").resolve())
+    mcp_env["ONSHAPE_MCP_MIRROR_IMAGES_DIR"] = mirror_dir
 
     skill = VISION_SKILL_PATH.read_text()
     system_prompt = (

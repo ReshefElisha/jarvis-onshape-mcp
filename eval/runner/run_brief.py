@@ -241,6 +241,11 @@ async def _run_agent(
                  "ONSHAPE_API_KEY", "ONSHAPE_API_SECRET"):
         if os.getenv(name):
             mcp_env[name] = os.environ[name]
+    # Mirror every cached image (renders, crops, composites) to disk so an
+    # external observer can `open eval/live_images/<image_id>.png` for any
+    # image_id they see in live.log.
+    mirror_dir = str((REPO / "eval" / "live_images").resolve())
+    mcp_env["ONSHAPE_MCP_MIRROR_IMAGES_DIR"] = mirror_dir
 
     options = ClaudeAgentOptions(
         mcp_servers={
