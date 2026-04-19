@@ -218,6 +218,7 @@ async def _run_agent(
     out_dir: Path,
     agent_step_target: Path,
     max_turns: int,
+    spec_override: Optional[str] = None,
 ) -> dict:
     from claude_agent_sdk import (
         query,
@@ -247,20 +248,31 @@ async def _run_agent(
 
     skill = _resolve_skill(variant_id)
     vision_skill = _resolve_vision_skill(variant_id)
-    base = (
-        "You are an engineering CAD designer driving Onshape through MCP tools.\n"
-        "Two-phase workflow:\n"
-        "  PHASE 1 (vision decomposition) — follow the VISION SKILL below. "
-        "Decompose the reference image(s) into a structured feature tree. "
-        "Do NOT call any Onshape mutation tool (create_*, update_*, delete_*, "
-        "export_*) during Phase 1.\n"
-        "  PHASE 2 (CAD build) — after Phase 1, follow the CAD SKILL below. "
-        "Call create_document + create_part_studio, build to the Phase 1 spec, "
-        "export STEP, reply DONE.\n"
-        "Protocols (follow strictly):\n"
-    )
-    if vision_skill:
-        base += "\n===== VISION SKILL (Phase 1) =====\n" + vision_skill + "\n"
+
+    if spec_override:
+        base = (
+            "You are an engineering CAD designer driving Onshape through MCP "
+            "tools. A VISION REPORT is attached to your user prompt — treat it "
+            "as AUTHORITATIVE SPEC and skip Phase 1. Do the CAD SKILL (Phase 2) "
+            "only: build to the spec, compare to the reference every few "
+            "features, export STEP, reply DONE.\n"
+            "Protocol:\n"
+        )
+    else:
+        base = (
+            "You are an engineering CAD designer driving Onshape through MCP tools.\n"
+            "Two-phase workflow:\n"
+            "  PHASE 1 (vision decomposition) — follow the VISION SKILL below. "
+            "Decompose the reference image(s) into a structured feature tree. "
+            "Do NOT call any Onshape mutation tool (create_*, update_*, delete_*, "
+            "export_*) during Phase 1.\n"
+            "  PHASE 2 (CAD build) — after Phase 1, follow the CAD SKILL below. "
+            "Call create_document + create_part_studio, build to the Phase 1 spec, "
+            "export STEP, reply DONE.\n"
+            "Protocols (follow strictly):\n"
+        )
+        if vision_skill:
+            base += "\n===== VISION SKILL (Phase 1) =====\n" + vision_skill + "\n"
     base += "\n===== CAD SKILL (Phase 2) =====\n" + skill
     system = base
 
@@ -311,6 +323,21 @@ async def _run_agent(
     )
 
     prompt_blocks = _compose_prompt(brief, agent_step_target)
+    if spec_override:
+        header = {
+            "type": "text",
+            "text": (
+                "\n\n=========================================================\n"
+                "VISION REPORT (authoritative — Phase 1 is pre-done, skip it)\n"
+                "=========================================================\n\n"
+                + spec_override
+                + "\n\n=========================================================\n"
+                "Proceed directly to Phase 2: create_document, build to the spec "
+                "above, export STEP, reply DONE.\n"
+            ),
+        }
+        # Insert right after the main text block (before images)
+        prompt_blocks = [prompt_blocks[0], header] + prompt_blocks[1:]
     (out_dir / "brief.txt").write_text(
         brief["brief_text"] + "\n\n--- images attached ---\n"
         + "\n".join(b.get("text", "<image>") for b in prompt_blocks if b.get("type") in ("text", "image"))
@@ -440,14 +467,24 @@ def run_brief(
     variant_id: Optional[str] = None,
     out_root: Optional[Path] = None,
     max_turns: int = 150,
+    spec_override_file: Optional[str] = None,
 ) -> dict:
     brief = _load_brief(brief_id)
     ref_step = MANIFEST_PATH.parent / brief["reference_step_path"]
     if not ref_step.exists():
         raise FileNotFoundError(f"reference STEP missing: {ref_step}")
 
+    spec_override: Optional[str] = None
+    if spec_override_file:
+        p = Path(spec_override_file)
+        if not p.exists():
+            raise FileNotFoundError(f"spec override file missing: {p}")
+        spec_override = p.read_text()
+
     ts = int(time.time())
     run_tag = f"{ts}-{variant_id or 'baseline'}"
+    if spec_override_file:
+        run_tag += "-HANDSPEC"
     out_dir = (out_root or (REPO / "eval" / "runs" / run_tag)) / brief_id
     out_dir.mkdir(parents=True, exist_ok=True)
     agent_step = out_dir / "agent.step"
@@ -459,6 +496,7 @@ def run_brief(
         out_dir=out_dir,
         agent_step_target=agent_step,
         max_turns=max_turns,
+        spec_override=spec_override,
     ))
     elapsed_s = time.monotonic() - t0
 
@@ -495,11 +533,20 @@ def _cli() -> int:
     p.add_argument("--brief-id", required=True)
     p.add_argument("--variant-id", default=None, help="Variant id; omit for baseline.")
     p.add_argument("--max-turns", type=int, default=150)
+    p.add_argument(
+        "--spec-override-file",
+        default=None,
+        help="Path to a pre-written VISION REPORT (feature spec). "
+             "If set, Phase 1 is skipped — the spec is prepended to the user "
+             "prompt as authoritative and the agent goes straight to Phase 2 "
+             "CAD build. Use this to decouple vision quality from CAD quality.",
+    )
     args = p.parse_args()
     result = run_brief(
         brief_id=args.brief_id,
         variant_id=args.variant_id,
         max_turns=args.max_turns,
+        spec_override_file=args.spec_override_file,
     )
     print(json.dumps({k: v for k, v in result.items() if k != "scores"},
                      indent=2, default=str))
