@@ -235,14 +235,20 @@ class ShadedViewManager:
         )
 
 
-def load_local_image(image_path: str, max_edge: int = 1568) -> RenderedView:
-    """Read a PNG from disk, cap long edge at `max_edge`, push into cache.
+def load_local_image(image_path: str, max_edge: int = 1200,
+                     max_bytes: int = 700_000) -> RenderedView:
+    """Read a PNG from disk, bound dimensions + bytes, push into cache.
 
     Lets the agent pass a filesystem reference image (from the brief) to
-    `crop_image` for dimension-callout zoom-ins. Downsamples to `max_edge`
-    on the long side — Claude's many-image API rejects >2000px in any
-    dimension, so we stay comfortably under. Subsequent `crop_image` calls
-    operate on the (possibly-downsampled) cached copy.
+    `crop_image` for dimension-callout zoom-ins. Constraints:
+
+    - Long edge ≤ `max_edge` (default 1200) so multi-image API doesn't
+      hit the 2000px-per-side limit.
+    - Encoded bytes ≤ `max_bytes` (default 700KB) so MCP's 1MB JSON
+      message limit doesn't overflow once base64-expanded (~1.33x).
+
+    If the PNG exceeds max_bytes, progressively shrink by 0.8x until it
+    fits. A 1980x1530 NIST drawing → ~1200x928 → 500-800KB typical.
     """
     from pathlib import Path
     p = Path(image_path)
@@ -253,9 +259,19 @@ def load_local_image(image_path: str, max_edge: int = 1568) -> RenderedView:
         scale = max_edge / max(img.width, img.height)
         img = img.resize((int(img.width * scale), int(img.height * scale)),
                          Image.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    png_bytes = buf.getvalue()
+
+    def _encode(pil) -> bytes:
+        buf = io.BytesIO()
+        pil.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    png_bytes = _encode(img)
+    # Progressive shrink if encoded size still too big for MCP JSON frame.
+    while len(png_bytes) > max_bytes and max(img.width, img.height) > 400:
+        img = img.resize((int(img.width * 0.8), int(img.height * 0.8)),
+                         Image.LANCZOS)
+        png_bytes = _encode(img)
+
     image_id = _put_image(
         png_bytes,
         meta={"source": {"kind": "local", "path": str(p.resolve())},
@@ -355,10 +371,11 @@ def compose_reference_comparison(
         composite.paste(img, (x, y))
         x += img.width
 
-    # Cap at 1568px long edge — Claude's many-image API rejects >2000 per
-    # dimension, and each compare_to_reference call stacks an ImageContent
-    # block in the conversation.
-    max_edge = 1568
+    # Cap on long edge (multi-image API limit) and on encoded bytes (MCP's
+    # 1MB JSON frame — base64 is ~1.33x so we target 700KB). Progressive
+    # shrink ensures both are satisfied without sacrificing readability.
+    max_edge = 1200
+    max_bytes = 700_000
     if max(composite.width, composite.height) > max_edge:
         scale = max_edge / max(composite.width, composite.height)
         composite = composite.resize(
@@ -366,9 +383,18 @@ def compose_reference_comparison(
             Image.LANCZOS,
         )
 
-    buf = io.BytesIO()
-    composite.save(buf, format="PNG")
-    out_bytes = buf.getvalue()
+    def _encode(pil) -> bytes:
+        buf = io.BytesIO()
+        pil.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    out_bytes = _encode(composite)
+    while len(out_bytes) > max_bytes and max(composite.width, composite.height) > 400:
+        composite = composite.resize(
+            (int(composite.width * 0.8), int(composite.height * 0.8)),
+            Image.LANCZOS,
+        )
+        out_bytes = _encode(composite)
     new_id = _put_image(
         out_bytes,
         meta={
