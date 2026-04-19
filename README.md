@@ -15,6 +15,22 @@ renders come back as image content so Claude can actually see the part.
   failures are surfaced, warnings are enriched with actionable fixes.
 - **Vision.** `render_part_studio_views` and `render_assembly_views` return
   shaded PNGs (front/top/right/iso). `crop_image` zooms in on regions.
+  `load_local_image` caches a reference image (drawing, photo, sketch) the
+  user shares so you can crop into it the same way. `compare_to_reference`
+  renders your in-progress part and composites it directly under the
+  reference for side-by-side visual diff in a single image.
+- **Vision-decomposition skill.** `/skill vision-decompose` — when the
+  user gives you a reference image and asks you to build it, this skill
+  walks you through a structured zoom-and-describe pass *before* you start
+  building. Produces a feature tree the user can sanity-check. We measured
+  this turns "agent skims image and builds the wrong shape" into "agent
+  reads image carefully, asks the user to confirm, then builds." See the
+  research writeup below.
+- **Drawing OCR.** `extract_drawing_dimensions` runs Tesseract on an
+  engineering drawing and returns every numeric callout (length / radius /
+  diameter / thread / angle / count) grouped by kind, with pixel positions.
+  Use it on hard-to-read drawing PNGs where small dim text gets clobbered
+  by Claude's vision downsampling.
 - **Entity discovery with outward normals.** `list_entities` returns deterministic
   face IDs, surface types, and normals so follow-up features can target geometry
   without guessing.
@@ -67,17 +83,46 @@ regen warnings. If it takes a wrong direction on an extrude, the
 
 ## Protocol guide
 
-`skills/onshape/SKILL.md` is auto-discovered by Claude Code as a plugin skill
-and loaded into every session alongside the MCP tools. It covers:
+Two plugin skills auto-discovered by Claude Code:
 
-- Units (bare numbers in mm; strings like `"0.5 in"` coerce to meters).
-- Coordinate frames (Front is XZ with sign flip on the Y normal).
-- Render-first and entity-first workflows (look before you cut).
-- Iteration discipline (one feature at a time; verify before stacking).
-- When to reach for `write_featurescript_feature` instead of primitives.
+- `skills/onshape/SKILL.md` — **CAD build skill**. Loaded into every Onshape
+  session. Covers units (bare numbers in mm), coordinate frames (Front is XZ
+  with a Y-normal sign flip), render-first and entity-first workflows,
+  iteration discipline, when to reach for `write_featurescript_feature`,
+  and the gotchas (REMOVE-on-face auto-flip, Variable Studios as separate
+  elements, deterministic ID remapping).
 
-You can load it into any Claude session as a system prompt to get the same
-behavior.
+- `skills/vision-decompose/SKILL.md` — **Vision decomposition**. Use this
+  *before* building when the user shares a reference image. Walks the agent
+  through overview → cache → zoom-into-each-feature → structured spec.
+  Output is a feature tree (type, role, size, position, face) the user can
+  review before committing turns to the build. See "Recommended workflow"
+  below.
+
+You can load either into any Claude session as a system prompt to get the
+same behavior outside the plugin context.
+
+## Recommended workflow
+
+The plugin works best as a copilot, not an autocomplete. Two modes:
+
+**Mode A — text-first design.** Describe the part in plain text ("a 100×60×30
+mm aluminum heat sink with 1mm fins on 3mm pitch and 4 corner Ø3.5 mounting
+holes") and let Claude build. This works well — the bottleneck is not CAD
+execution, it's image interpretation.
+
+**Mode B — image reference.** Drop in a drawing, photo, sketch, or
+competition prompt and ask Claude to build it.
+
+1. Invoke the vision-decomposition skill: `/skill vision-decompose`.
+2. Claude produces a structured feature tree from the image.
+3. Review it — fix mis-reads, fill in things the image didn't make obvious.
+4. Tell Claude "build to that spec." It runs the CAD pipeline against the
+   confirmed tree.
+
+Mode B with a careful human review beats letting Claude attempt the whole
+thing autonomously. See `RESEARCH.md` for the experimental data behind that
+recommendation.
 
 ## Tool surface
 
@@ -92,7 +137,7 @@ Roughly 60 tools across these groups:
 | Introspection | `describe_part_studio`, `list_entities`, `get_body_details`, `get_bounding_box`, `get_mass_properties`, `measure`, `get_face_coordinate_system` |
 | Variables | `create_variable_studio`, `set_variable`, `get_variables` |
 | FeatureScript | `eval_featurescript`, `write_featurescript_feature` |
-| Rendering | `render_part_studio_views`, `render_assembly_views`, `crop_image` |
+| Rendering | `render_part_studio_views`, `render_assembly_views`, `crop_image`, `load_local_image`, `compare_to_reference`, `extract_drawing_dimensions` |
 | Export | `export_part_studio`, `export_assembly` (STL / STEP / GLTF / …) |
 
 Full schemas are discoverable from Claude via `ToolSearch` — no separate

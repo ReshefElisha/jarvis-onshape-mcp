@@ -54,10 +54,31 @@ _IMAGE_META: Dict[str, Dict[str, Any]] = {}
 
 
 def _put_image(png_bytes: bytes, meta: Dict[str, Any]) -> str:
-    """Insert a PNG into the cache and return a stable image_id."""
+    """Insert a PNG into the cache and return a stable image_id.
+
+    If the env var `ONSHAPE_MCP_MIRROR_IMAGES_DIR` is set (typically by the
+    eval harness), also writes the PNG to that directory as
+    `<image_id>.png`. Lets an external observer inspect exactly what the
+    agent saw after each render/crop — look up the image_id from live.log
+    and `open eval/live_images/<image_id>.png`.
+    """
+    import os
     image_id = "img_" + hashlib.sha256(png_bytes).hexdigest()[:16]
     _IMAGE_CACHE[image_id] = png_bytes
     _IMAGE_META[image_id] = meta
+
+    mirror_dir = os.environ.get("ONSHAPE_MCP_MIRROR_IMAGES_DIR")
+    if mirror_dir:
+        try:
+            from pathlib import Path
+            p = Path(mirror_dir)
+            p.mkdir(parents=True, exist_ok=True)
+            out = p / f"{image_id}.png"
+            if not out.exists():
+                out.write_bytes(png_bytes)
+        except Exception:
+            # Best-effort — don't let mirror failures break real work.
+            pass
     return image_id
 
 
@@ -233,6 +254,160 @@ class ShadedViewManager:
         return RenderedView(
             view=view, image_id=image_id, width=width, height=height, bytes=len(png_bytes)
         )
+
+
+def load_local_image(image_path: str, max_edge: int = 1568) -> RenderedView:
+    """Read a PNG from disk, cap long edge at `max_edge`, push into cache.
+
+    Lets the agent pass a filesystem reference image (from the brief) to
+    `crop_image` for dimension-callout zoom-ins. Capped at 1568px long
+    edge so the multi-image API doesn't hit Anthropic's 2000-per-side
+    limit. The runner sets max_buffer_size on the agent SDK so a single
+    image returning ≤ a few MB is fine over MCP.
+    """
+    from pathlib import Path
+    p = Path(image_path)
+    if not p.exists():
+        raise FileNotFoundError(f"load_local_image: {image_path}")
+    img = Image.open(p).convert("RGB")
+    if max(img.width, img.height) > max_edge:
+        scale = max_edge / max(img.width, img.height)
+        img = img.resize((int(img.width * scale), int(img.height * scale)),
+                         Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    png_bytes = buf.getvalue()
+    image_id = _put_image(
+        png_bytes,
+        meta={"source": {"kind": "local", "path": str(p.resolve())},
+              "width": img.width, "height": img.height},
+    )
+    return RenderedView(
+        view=f"local:{p.name}",
+        image_id=image_id,
+        width=img.width,
+        height=img.height,
+        bytes=len(png_bytes),
+    )
+
+
+def compose_reference_comparison(
+    reference_image_path: str,
+    rendered_views: List[RenderedView],
+    label_ref: str = "REFERENCE",
+    label_agent: str = "YOUR BUILD",
+    agent_bbox_mm: Optional[tuple[float, float, float]] = None,
+) -> RenderedView:
+    """Compose a side-by-side comparison: reference image on top, a row of agent
+    renders below. Caches the composite and returns a RenderedView.
+
+    The reference image is typically a multi-view engineering sheet (iso +
+    front + top + right) from the brief. Placing it directly above the
+    agent's fresh renders makes the diff obvious in a single ImageContent
+    block — the agent can see at a glance where features are missing or
+    misplaced.
+
+    Image scaling: the reference is resized to match the total width of the
+    agent-renders row (preserving aspect), so both rows share the same
+    horizontal extent.
+
+    If `agent_bbox_mm` is supplied, it's stamped into the agent-row label so
+    the agent can numerically cross-check its build's dimensions against the
+    drawing's explicit dimensions. Without this annotation the composite
+    hides scale mismatch — a 800 mm reference and a 200 mm agent render
+    look identical pixel-wise.
+    """
+    from pathlib import Path
+    from PIL import ImageDraw, ImageFont
+
+    ref_path = Path(reference_image_path)
+    if not ref_path.exists():
+        raise FileNotFoundError(f"reference image not found: {reference_image_path}")
+
+    ref_img = Image.open(ref_path).convert("RGB")
+    if not rendered_views:
+        raise ValueError("compose_reference_comparison: need at least 1 rendered view")
+
+    # Agent row: concatenate rendered views horizontally at their native height.
+    agent_imgs = [Image.open(io.BytesIO(get_image(r.image_id))).convert("RGB")
+                  for r in rendered_views]
+    row_h = max(img.height for img in agent_imgs)
+    # Normalize each agent view to row_h keeping aspect ratio.
+    agent_imgs = [img if img.height == row_h
+                  else img.resize((int(img.width * row_h / img.height), row_h), Image.LANCZOS)
+                  for img in agent_imgs]
+    agent_row_w = sum(img.width for img in agent_imgs)
+
+    # Reference row: scale to agent_row_w.
+    ref_w = agent_row_w
+    ref_h = int(ref_img.height * ref_w / ref_img.width)
+    ref_img = ref_img.resize((ref_w, ref_h), Image.LANCZOS)
+
+    # Compose: labels strip + ref + labels strip + agent row.
+    label_h = 40
+    total_h = label_h + ref_h + label_h + row_h
+    composite = Image.new("RGB", (agent_row_w, total_h), "white")
+    draw = ImageDraw.Draw(composite)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Reference label: always flag that pixel size != world size.
+    draw.rectangle([(0, 0), (agent_row_w, label_h)], fill="#333333")
+    draw.text((16, 6),
+              f"{label_ref} — dims from drawing callouts (NOT pixel size)",
+              fill="white", font=font)
+    composite.paste(ref_img, (0, label_h))
+
+    agent_label_y = label_h + ref_h
+    draw.rectangle([(0, agent_label_y), (agent_row_w, agent_label_y + label_h)],
+                   fill="#333333")
+    views_str = ", ".join(r.view for r in rendered_views)
+    agent_label = f"{label_agent}  ({views_str})"
+    if agent_bbox_mm is not None:
+        dx, dy, dz = agent_bbox_mm
+        agent_label += f"  |  bbox {dx:.1f} × {dy:.1f} × {dz:.1f} mm"
+    draw.text((16, agent_label_y + 6), agent_label, fill="white", font=font)
+
+    x = 0
+    y = agent_label_y + label_h
+    for img in agent_imgs:
+        composite.paste(img, (x, y))
+        x += img.width
+
+    # Cap at 1568px long edge — Anthropic multi-image API limit is 2000
+    # per side. The runner bumps SDK max_buffer_size so a few-MB PNG
+    # round-trips fine.
+    max_edge = 1568
+    if max(composite.width, composite.height) > max_edge:
+        scale = max_edge / max(composite.width, composite.height)
+        composite = composite.resize(
+            (int(composite.width * scale), int(composite.height * scale)),
+            Image.LANCZOS,
+        )
+
+    buf = io.BytesIO()
+    composite.save(buf, format="PNG", optimize=True)
+    out_bytes = buf.getvalue()
+    new_id = _put_image(
+        out_bytes,
+        meta={
+            "kind": "comparison",
+            "reference_path": str(ref_path),
+            "agent_views": [r.view for r in rendered_views],
+            "agent_image_ids": [r.image_id for r in rendered_views],
+            "width": composite.width,
+            "height": composite.height,
+        },
+    )
+    return RenderedView(
+        view="reference_vs_build",
+        image_id=new_id,
+        width=composite.width,
+        height=composite.height,
+        bytes=len(out_bytes),
+    )
 
 
 def crop_cached_image(

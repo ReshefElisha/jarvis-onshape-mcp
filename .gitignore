@@ -101,3 +101,4 @@ htmlcov/
 
 # OS
 .DS_Store
+/eval/

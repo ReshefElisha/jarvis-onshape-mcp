@@ -38,12 +38,15 @@ from .api.entities import EntityManager
 from .api.describe import DescribeManager
 from .api.measurements import MeasurementManager
 from .api.custom_features import CustomFeatureManager, DEFAULT_FS_VERSION
+from .api.drawing_ocr import callouts_to_dict, extract_callouts
 from .api.rendering import (
     ShadedViewManager,
+    compose_reference_comparison,
     crop_cached_image,
     get_image,
     get_image_meta,
     list_cached_image_ids,
+    load_local_image,
 )
 from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
@@ -1674,6 +1677,84 @@ async def list_tools() -> list[Tool]:
                     "edges": {"type": "boolean", "default": True},
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="extract_drawing_dimensions",
+            description=(
+                "OCR a drawing PNG and return every numeric callout it can read, "
+                "grouped by kind: length / radius / diameter / thread / angle / "
+                "count / scale. Each callout includes pixel-position so you can map "
+                "it to a specific feature in the drawing (compare against your view "
+                "of the image). USE THIS BEFORE READING DIMS BY EYE — Tesseract is "
+                "more reliable than your vision pass on small text. Known limit: "
+                "Ø often misreads as '9' (e.g. 'Ø50' → '950'); cross-check "
+                "high-significance dims with crop_image at native resolution."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "imagePath": {
+                        "type": "string",
+                        "description": "Filesystem path to a drawing PNG.",
+                    },
+                },
+                "required": ["imagePath"],
+            },
+        ),
+        Tool(
+            name="load_local_image",
+            description=(
+                "Read a PNG from disk (e.g. the brief's reference drawing) into "
+                "the image cache so you can crop_image into it at native resolution. "
+                "Returns image_id + dimensions. Without this, the reference image "
+                "lives only in the prompt as inline base64 — no way to zoom into a "
+                "dimension callout. Use this ONCE per brief on the reference path "
+                "you were given, then crop_image to read small text."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "imagePath": {
+                        "type": "string",
+                        "description": "Filesystem path to a PNG readable by the MCP server.",
+                    },
+                },
+                "required": ["imagePath"],
+            },
+        ),
+        Tool(
+            name="compare_to_reference",
+            description=(
+                "Render your current Part Studio at iso/top/front/right and COMPOSITE the "
+                "result directly under a reference image from disk. Returns a single side-"
+                "by-side PNG: reference on top, your build's 4 views on the bottom row, "
+                "both at the same horizontal extent so silhouettes line up visually. Use "
+                "this whenever you want to cross-check feature count / placement / "
+                "proportion against the brief's reference figure — it removes the need to "
+                "squint back and forth across separate images. The reference path you pass "
+                "is a filesystem path readable by the MCP server (typically the brief's "
+                "iso or drawing PNG)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string"},
+                    "referenceImagePath": {
+                        "type": "string",
+                        "description": "Absolute or cwd-relative filesystem path to the reference PNG.",
+                    },
+                    "views": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Views to render for the agent row. Default: iso,top,front,right.",
+                    },
+                    "width": {"type": "integer", "default": 800},
+                    "height": {"type": "integer", "default": 600},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "referenceImagePath"],
             },
         ),
         Tool(
@@ -4405,6 +4486,130 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"Render failed: {e}")]
+
+    elif name == "extract_drawing_dimensions":
+        try:
+            callouts = extract_callouts(arguments["imagePath"])
+            payload = callouts_to_dict(callouts)
+            n = len(callouts)
+            by_kind = payload["by_kind"]
+            summary_lines = [
+                f"Extracted {n} numeric callouts from {arguments['imagePath']}.",
+                "",
+                "BY KIND (use these as the candidate dimensions for your build):",
+            ]
+            for kind in ("length", "radius", "diameter", "thread", "angle", "count", "scale"):
+                vals = by_kind.get(kind, [])
+                if vals:
+                    summary_lines.append(f"  {kind}: {vals}")
+            summary_lines.append("")
+            summary_lines.append("FULL TABLE (text @ pixel-x,y, conf):")
+            for c in callouts:
+                summary_lines.append(
+                    f"  [{c.kind:>9}] {c.text!r:<28} @ ({c.x},{c.y}) conf={c.confidence:.0f}"
+                )
+            return [TextContent(type="text", text="\n".join(summary_lines))]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"extract_drawing_dimensions: {e}")]
+        except Exception as e:
+            logger.exception("extract_drawing_dimensions failed")
+            return [TextContent(type="text", text=f"extract_drawing_dimensions failed: {e}")]
+
+    elif name == "load_local_image":
+        try:
+            rv = load_local_image(arguments["imagePath"])
+            png = get_image(rv.image_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Loaded {arguments['imagePath']} ({rv.width}x{rv.height}px, "
+                        f"{rv.bytes} bytes). image_id={rv.image_id}. "
+                        f"You can now crop_image on this id to zoom into callouts."
+                    ),
+                ),
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType="image/png",
+                ),
+            ]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"load_local_image: {e}")]
+        except Exception as e:
+            logger.exception("load_local_image failed")
+            return [TextContent(type="text", text=f"load_local_image failed: {e}")]
+
+    elif name == "compare_to_reference":
+        try:
+            views = arguments.get("views") or ["iso", "top", "front", "right"]
+            # Fetch bbox in parallel with the renders so the composite can
+            # annotate the agent row with world-space dimensions (drawings
+            # specify mm, composite visuals don't — without this the agent
+            # can't tell a 200mm build from an 800mm build side-by-side).
+            rendered_task = asyncio.create_task(
+                shaded_view_manager.render_part_studio_views(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                    views=views,
+                    width=int(arguments.get("width", 800)),
+                    height=int(arguments.get("height", 600)),
+                )
+            )
+            bbox_task = asyncio.create_task(
+                featurescript_manager.get_bounding_box(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                )
+            )
+            rendered, bbox_raw = await asyncio.gather(
+                rendered_task, bbox_task, return_exceptions=True,
+            )
+            if isinstance(rendered, Exception):
+                raise rendered
+            agent_bbox_mm = None
+            if not isinstance(bbox_raw, Exception) and bbox_raw:
+                try:
+                    minp = bbox_raw.get("minCorner") or {}
+                    maxp = bbox_raw.get("maxCorner") or {}
+                    # Values are in meters; convert to mm for the label.
+                    dx = (float(maxp.get("x", 0)) - float(minp.get("x", 0))) * 1000.0
+                    dy = (float(maxp.get("y", 0)) - float(minp.get("y", 0))) * 1000.0
+                    dz = (float(maxp.get("z", 0)) - float(minp.get("z", 0))) * 1000.0
+                    agent_bbox_mm = (dx, dy, dz)
+                except Exception:
+                    agent_bbox_mm = None
+            composite = compose_reference_comparison(
+                reference_image_path=arguments["referenceImagePath"],
+                rendered_views=rendered,
+                agent_bbox_mm=agent_bbox_mm,
+            )
+            png = get_image(composite.image_id)
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"Comparison composite: reference `{arguments['referenceImagePath']}` "
+                        f"on top, your build's {len(rendered)} views ({', '.join(views)}) on the "
+                        f"bottom row. image_id={composite.image_id}, "
+                        f"{composite.width}x{composite.height}px. Scan for: (a) features in the "
+                        f"reference missing from your row, (b) your features in wrong positions "
+                        f"relative to reference, (c) proportions that don't match."
+                    ),
+                ),
+                ImageContent(
+                    type="image",
+                    data=base64.b64encode(png).decode("ascii"),
+                    mimeType="image/png",
+                ),
+            ]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"compare_to_reference: {e}")]
+        except Exception as e:
+            logger.exception("compare_to_reference failed")
+            return [TextContent(type="text", text=f"compare_to_reference failed: {e}")]
 
     elif name == "crop_image":
         try:
