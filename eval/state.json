@@ -3,8 +3,8 @@
   "tier_stable_iterations": 0,
   "round_robin_cursor": {
     "easy": 9,
-    "medium": 0,
+    "medium": 3,
     "hard": 0
   },
-  "iteration": 14
+  "iteration": 15
 }
