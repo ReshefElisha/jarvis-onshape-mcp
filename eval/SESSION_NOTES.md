@@ -254,3 +254,55 @@ L4=0 wall. If they do, SKILL mutations are useful there; if they
 don't, the wall is positional accuracy overall and we should expand
 mutation scope to server.py _INSTRUCTIONS (Phase 5) or add tool-level
 help (a sanity-check measure? a harness hint?).
+
+## 2026-04-18 — v004 compare_to_reference tool + hard tier results
+
+Scope-widening: first tool-level mutation. Built `compare_to_reference`
+MCP tool (onshape_mcp/api/rendering.py + server.py). Returns one
+composite image: reference on top, agent's iso/top/front/right below.
+Runner injects the reference absolute path into the agent prompt.
+
+v004 on hard tier (nist_ctc_01/02/03 drawings):
+- ctc_01: 0.064  (baseline 0.046)
+- ctc_02: 0.0    (no export; likely cap or error)
+- ctc_03: 0.019  (baseline 0.015)
+- **mean 0.028** vs baseline 0.020 (+0.008)
+
+Tool was used: 5/2/6 compare_to_reference calls per brief.
+Agent substituted compare_to_reference for describe_part_studio (calls
+dropped to 3/1/1).
+
+**Two new problems the tool didn't solve:**
+
+1. **Scale misreading.** Agent built ctc_01 at 200×37×100 mm vs ref
+   800×450×150. That's 4× under-scaled. ctc_03 similar (172×228×1.5 vs
+   320×534×163 — agent built a flat pancake). L2 bbox fails, not L4.
+   Drawings specify dims numerically but the agent doesn't sanity-check.
+
+2. **Tool bug in my composite**: `compose_reference_comparison` RESIZES
+   the reference to match the agent-row width. That hides scale
+   mismatch — a 800mm reference and a 200mm agent render look the same
+   visual size in the composite. Need to either keep native scale or
+   annotate each image with its dimensions.
+
+**Shef's rotation-invariance point stands too**: some runs do have
+correct-but-rotated parts that grader v4 marks at 0. Haven't hit that
+case in hard tier (scale is dominating), but it's real.
+
+**Scoreboard:**
+```
+medium baseline      : 0.155 (n=1)
+medium v001          : 0.193 (n=2 clean, KEPT)
+medium v002          : 0.189 (n=1, REVERTED)
+medium v003          : 0.155 (n=1, REVERTED)
+hard baseline        : 0.020 (n=1)
+hard v004 (tool)     : 0.028 (n=1, marginal)
+```
+
+**Next:**
+- Fix compose_reference_comparison to show dimensions + preserve scale
+  ratios (annotate "REF 800×450×150 mm" / "YOU 200×37×100 mm" on the
+  composite labels).
+- Add rotation-invariant IoU to the grader (principal-axis
+  canonicalization + try cubic symmetry rotations). Grader v5.
+- Add explicit "verify your bbox dims against the drawing" to SKILL.
