@@ -211,17 +211,49 @@ def align_bbox_centers(a: TopoDS_Shape, b: TopoDS_Shape) -> Tuple[TopoDS_Shape, 
     return _translate(a, bx - ax, by - ay, bz - az), b
 
 
-def boolean_iou(a: TopoDS_Shape, b: TopoDS_Shape, align: bool = True) -> float:
-    """vol(A ∩ B) / vol(A ∪ B). Returns 0 on degenerate cases.
+def _rotate(shape: TopoDS_Shape, R33) -> TopoDS_Shape:
+    """Apply a 3x3 rotation matrix to `shape`. Expects a proper rotation
+    (det = +1). Uses OCC's Trsf.SetValues taking 12 coefficients (3x4)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.gp import gp_Trsf
+    trsf = gp_Trsf()
+    trsf.SetValues(
+        R33[0][0], R33[0][1], R33[0][2], 0.0,
+        R33[1][0], R33[1][1], R33[1][2], 0.0,
+        R33[2][0], R33[2][1], R33[2][2], 0.0,
+    )
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
 
-    By default, translates A so its bbox center aligns with B's before
-    computing the boolean. Pass `align=False` to disable (used when the
-    caller has already aligned, or when position disagreement should count).
-    """
-    va = volume(a)
-    vb = volume(b)
-    if va == 0.0 or vb == 0.0:
-        return 0.0
+
+def _cubic_rotation_matrices():
+    """Return the 24 proper rotations of the cube (axis permutations +
+    sign flips with det = +1). Cached on first call."""
+    if hasattr(_cubic_rotation_matrices, "_cache"):
+        return _cubic_rotation_matrices._cache
+    from itertools import permutations, product
+    rots = []
+    for perm in permutations([0, 1, 2]):
+        P = [[0.0]*3 for _ in range(3)]
+        for i, pi in enumerate(perm):
+            P[i][pi] = 1.0
+        for signs in product([1.0, -1.0], repeat=3):
+            R = [[P[i][j] * signs[j] for j in range(3)] for i in range(3)]
+            # determinant of a signed permutation: product of sign * sign(perm).
+            det = signs[0] * signs[1] * signs[2]
+            # Parity of permutation
+            parity = 1
+            for i in range(3):
+                for j in range(i+1, 3):
+                    if perm[i] > perm[j]:
+                        parity *= -1
+            if det * parity > 0:  # proper rotation
+                rots.append(R)
+    assert len(rots) == 24, f"expected 24, got {len(rots)}"
+    _cubic_rotation_matrices._cache = rots
+    return rots
+
+
+def _iou_aligned(a: TopoDS_Shape, b: TopoDS_Shape, align: bool = True) -> float:
     if align:
         a, b = align_bbox_centers(a, b)
     try:
@@ -229,11 +261,65 @@ def boolean_iou(a: TopoDS_Shape, b: TopoDS_Shape, align: bool = True) -> float:
         union = BRepAlgoAPI_Fuse(a, b).Shape()
     except Exception:
         return 0.0
-    v_inter = volume(inter)
     v_union = volume(union)
     if v_union == 0.0:
         return 0.0
-    return v_inter / v_union
+    return volume(inter) / v_union
+
+
+def find_best_rotation(a: TopoDS_Shape, b: TopoDS_Shape) -> Tuple[TopoDS_Shape, float]:
+    """Find the axis-aligned rotation of `a` that maximizes IoU with `b`.
+    Returns (rotated_a, iou). Skips rotation search if bbox sorted dims
+    don't match within 25% — in that case the shapes aren't the same
+    solid at any rotation.
+    """
+    va = volume(a)
+    vb = volume(b)
+    if va == 0.0 or vb == 0.0:
+        return a, 0.0
+    a_bbox = bbox(a)
+    b_bbox = bbox(b)
+    a_sorted = sorted([a_bbox.dx, a_bbox.dy, a_bbox.dz], reverse=True)
+    b_sorted = sorted([b_bbox.dx, b_bbox.dy, b_bbox.dz], reverse=True)
+    if not all(abs(x - y) / max(y, 1e-9) < 0.25 for x, y in zip(a_sorted, b_sorted)):
+        return a, _iou_aligned(a, b)
+    best_shape = a
+    best_iou = 0.0
+    for R in _cubic_rotation_matrices():
+        rotated = _rotate(a, R)
+        iou = _iou_aligned(rotated, b)
+        if iou > best_iou:
+            best_iou = iou
+            best_shape = rotated
+            if best_iou > 0.99:
+                break
+    return best_shape, best_iou
+
+
+def boolean_iou(
+    a: TopoDS_Shape,
+    b: TopoDS_Shape,
+    align: bool = True,
+    rotation_invariant: bool = True,
+) -> float:
+    """vol(A ∩ B) / vol(A ∪ B). Returns 0 on degenerate cases.
+
+    Translates A so its bbox center aligns with B's before computing the
+    boolean. If `rotation_invariant` (default), also tries the 24 proper
+    rotations of the cube (±90°/±180° per axis) and returns the best IoU.
+    This captures the case where the agent built the correct shape but
+    in a different world-frame orientation. Non-axis-aligned rotations
+    are NOT tested — orientation beyond ±90° is treated as a real error.
+
+    Pass `align=False` to skip translation alignment; pass
+    `rotation_invariant=False` to require orientation agreement.
+    """
+    if volume(a) == 0.0 or volume(b) == 0.0:
+        return 0.0
+    if not rotation_invariant:
+        return _iou_aligned(a, b, align=align)
+    _, iou = find_best_rotation(a, b)
+    return iou
 
 
 # --- Tessellation + Chamfer ------------------------------------------
@@ -272,6 +358,7 @@ def chamfer_distance(
     b: TopoDS_Shape,
     n_samples: int = 10000,
     align: bool = True,
+    rotation_invariant: bool = True,
 ) -> float:
     """Symmetric Chamfer distance between tessellations of a and b, in meters.
 
@@ -279,8 +366,14 @@ def chamfer_distance(
     the mean of mean-forward-distance and mean-backward-distance.
 
     When `align=True` (default) the two shapes' bbox centers are aligned
-    before tessellation — same position-invariance as boolean_iou.
+    before tessellation. When `rotation_invariant`, tries the 24 cubic
+    rotations of A and returns the MIN distance — matches boolean_iou's
+    rotation handling so both layers agree about whether two shapes are
+    equivalent up to ±90° world-axis rotation.
     """
+    if rotation_invariant:
+        # Pick the rotation found best by boolean-IoU and use that for Chamfer.
+        a, _ = find_best_rotation(a, b)
     if align:
         a, b = align_bbox_centers(a, b)
     # Use a bbox-diag-fraction deflection so large + small shapes both tess well.

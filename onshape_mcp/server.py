@@ -4444,17 +4444,48 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
     elif name == "compare_to_reference":
         try:
             views = arguments.get("views") or ["iso", "top", "front", "right"]
-            rendered = await shaded_view_manager.render_part_studio_views(
-                document_id=arguments["documentId"],
-                workspace_id=arguments["workspaceId"],
-                element_id=arguments["elementId"],
-                views=views,
-                width=int(arguments.get("width", 800)),
-                height=int(arguments.get("height", 600)),
+            # Fetch bbox in parallel with the renders so the composite can
+            # annotate the agent row with world-space dimensions (drawings
+            # specify mm, composite visuals don't — without this the agent
+            # can't tell a 200mm build from an 800mm build side-by-side).
+            rendered_task = asyncio.create_task(
+                shaded_view_manager.render_part_studio_views(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                    views=views,
+                    width=int(arguments.get("width", 800)),
+                    height=int(arguments.get("height", 600)),
+                )
             )
+            bbox_task = asyncio.create_task(
+                featurescript_manager.get_bounding_box(
+                    document_id=arguments["documentId"],
+                    workspace_id=arguments["workspaceId"],
+                    element_id=arguments["elementId"],
+                )
+            )
+            rendered, bbox_raw = await asyncio.gather(
+                rendered_task, bbox_task, return_exceptions=True,
+            )
+            if isinstance(rendered, Exception):
+                raise rendered
+            agent_bbox_mm = None
+            if not isinstance(bbox_raw, Exception) and bbox_raw:
+                try:
+                    minp = bbox_raw.get("minCorner") or {}
+                    maxp = bbox_raw.get("maxCorner") or {}
+                    # Values are in meters; convert to mm for the label.
+                    dx = (float(maxp.get("x", 0)) - float(minp.get("x", 0))) * 1000.0
+                    dy = (float(maxp.get("y", 0)) - float(minp.get("y", 0))) * 1000.0
+                    dz = (float(maxp.get("z", 0)) - float(minp.get("z", 0))) * 1000.0
+                    agent_bbox_mm = (dx, dy, dz)
+                except Exception:
+                    agent_bbox_mm = None
             composite = compose_reference_comparison(
                 reference_image_path=arguments["referenceImagePath"],
                 rendered_views=rendered,
+                agent_bbox_mm=agent_bbox_mm,
             )
             png = get_image(composite.image_id)
             return [

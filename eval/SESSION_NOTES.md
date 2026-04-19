@@ -306,3 +306,29 @@ hard v004 (tool)     : 0.028 (n=1, marginal)
 - Add rotation-invariant IoU to the grader (principal-axis
   canonicalization + try cubic symmetry rotations). Grader v5.
 - Add explicit "verify your bbox dims against the drawing" to SKILL.
+
+## 2026-04-18 — grader v5 (rotation invariance) + composite fix
+
+Grader v5: L4 Boolean IoU and L5 Chamfer now try all 24 proper rotations
+of the cube (axis permutations × sign flips with det = +1). Picks the
+rotation that maximizes IoU. Shapes whose sorted bbox dims don't match
+within 25% skip the rotation search (fast-path).
+
+Regressions passed: a 90°-rotated copy of a reference STEP now scores
+IoU 1.0 (vs 0.188 on grader v4). Reverse case (intentionally different
+shapes) unaffected.
+
+Regraded all runs. **No score changes** — none of the historical agent
+builds were "correct-but-rotated." Shef's flag about CTC01 was either
+fixed by the agent before export, or the part was wrong enough that
+even rotation-aware IoU is 0. Still useful capability to have.
+
+compose_reference_comparison fix: composite label now warns
+"REFERENCE — dims from drawing callouts (NOT pixel size)" and stamps
+"bbox X × Y × Z mm" on the agent row. Server handler fetches bbox in
+parallel with rendering so no extra latency. This addresses the
+200mm-agent-vs-800mm-ref scale-hiding bug I found after v004.
+
+Grader hash bumped to v5. All prior scoreboard entries carry
+`regraded_with_grader_version: 5` now. v001 still best on medium
+(mean 0.193 over 2 clean runs).

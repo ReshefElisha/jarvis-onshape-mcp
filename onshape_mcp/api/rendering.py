@@ -240,6 +240,7 @@ def compose_reference_comparison(
     rendered_views: List[RenderedView],
     label_ref: str = "REFERENCE",
     label_agent: str = "YOUR BUILD",
+    agent_bbox_mm: Optional[tuple[float, float, float]] = None,
 ) -> RenderedView:
     """Compose a side-by-side comparison: reference image on top, a row of agent
     renders below. Caches the composite and returns a RenderedView.
@@ -253,6 +254,12 @@ def compose_reference_comparison(
     Image scaling: the reference is resized to match the total width of the
     agent-renders row (preserving aspect), so both rows share the same
     horizontal extent.
+
+    If `agent_bbox_mm` is supplied, it's stamped into the agent-row label so
+    the agent can numerically cross-check its build's dimensions against the
+    drawing's explicit dimensions. Without this annotation the composite
+    hides scale mismatch — a 800 mm reference and a 200 mm agent render
+    look identical pixel-wise.
     """
     from pathlib import Path
     from PIL import ImageDraw, ImageFont
@@ -290,16 +297,22 @@ def compose_reference_comparison(
     except Exception:
         font = ImageFont.load_default()
 
+    # Reference label: always flag that pixel size != world size.
     draw.rectangle([(0, 0), (agent_row_w, label_h)], fill="#333333")
-    draw.text((16, 6), label_ref, fill="white", font=font)
+    draw.text((16, 6),
+              f"{label_ref} — dims from drawing callouts (NOT pixel size)",
+              fill="white", font=font)
     composite.paste(ref_img, (0, label_h))
 
     agent_label_y = label_h + ref_h
     draw.rectangle([(0, agent_label_y), (agent_row_w, agent_label_y + label_h)],
                    fill="#333333")
     views_str = ", ".join(r.view for r in rendered_views)
-    draw.text((16, agent_label_y + 6), f"{label_agent}  ({views_str})",
-              fill="white", font=font)
+    agent_label = f"{label_agent}  ({views_str})"
+    if agent_bbox_mm is not None:
+        dx, dy, dz = agent_bbox_mm
+        agent_label += f"  |  bbox {dx:.1f} × {dy:.1f} × {dz:.1f} mm"
+    draw.text((16, agent_label_y + 6), agent_label, fill="white", font=font)
 
     x = 0
     y = agent_label_y + label_h
