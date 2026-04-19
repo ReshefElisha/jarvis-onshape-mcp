@@ -332,3 +332,35 @@ parallel with rendering so no extra latency. This addresses the
 Grader hash bumped to v5. All prior scoreboard entries carry
 `regraded_with_grader_version: 5` now. v001 still best on medium
 (mean 0.193 over 2 clean runs).
+
+## 2026-04-18 — v006 abandoned; pivoting
+
+v006 (crop-the-callouts) hit two harness bugs:
+1. Image dim limit (multi-image ≤ 2000px/side) — fixed by capping at 1568.
+2. SDK stdout buffer 1MB cap — properly fixed by setting
+   ClaudeAgentOptions.max_buffer_size=16MB on the runner side.
+
+The fixed-fixed v006 run was killed before completing. Latest scored
+v006 entry on scoreboard reflects the broken-fix attempt (mean 0.025
+with 2/3 briefs erroring). **Not a valid signal — ignore for KEEP/REVERT.**
+
+Decision: stop iterating on v006. The crop-the-callouts loop costs many
+turns and the gains on the one brief that DID complete (ctc_01 0.075 vs
+baseline 0.046) don't justify the regression risk on the others.
+
+What we have learned end-to-end:
+- SKILL-text mutations on medium tier cap out at v001 (~0.04 above
+  baseline, n=2 clean).
+- Tool-level additions (compare_to_reference, load_local_image) work
+  but have integration costs (size limits, multi-image accumulation).
+- Hard tier (drawings) baseline is near zero; gains on individual
+  briefs are within noise.
+
+**Next direction options:**
+1. Re-run **v004** (compare_to_reference) on **medium tier** — it was
+   designed for hard but the visual diff might also help on medium
+   where L4=0 is the dominant failure.
+2. Build a **v007** that drops the heavy crop loop and just uses
+   compare_to_reference at strategic checkpoints.
+3. Step back and add **MORE seed briefs** to lift the noise floor and
+   give the loop more failure modes to mine.

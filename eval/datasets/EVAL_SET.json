@@ -1,14 +1,14 @@
 {
-  "eval_set_id": "eval_v2",
-  "note": "Tiered curriculum. Loop samples from the current tier each iteration; promotes to the next tier when the current variant hits `promote_threshold` for `promote_stable_iterations` in a row. Dataset frozen — only `current_tier` in eval/state.json mutates as the loop progresses.",
+  "eval_set_id": "eval_v3",
+  "note": "Tiered curriculum, v3. Drops most NIST drawings from hard tier per Shef ruling 2026-04-18: NIST PMI parts are designed to test PMI-extraction software (intentionally tortuous callouts) and are too brutal as agent-evaluation inputs. Model Mania drawings are real engineering challenge problems — much fairer scoring signal. Hard tier now leads with Model Mania; one NIST kept (ctc_01) as a stretch reference. Per-iteration sample is 3 briefs (round-robin within tier). Bumping `eval_set_id` to v3 — prior scoreboard runs against eval_v2 are tagged but not directly comparable to eval_v3 means.",
   "per_iteration_sample_size": 3,
   "per_iteration_sampling": "round_robin_within_current_tier",
-  "promote_threshold": 0.70,
+  "promote_threshold": 0.50,
   "promote_stable_iterations": 3,
   "full_validation_every_n_iterations": 10,
   "tiers": {
     "easy": {
-      "description": "Trivial procedural parts. Claude should one-shot these with the current skill; if it can't, the skill is broken. Includes all seed_ briefs plus a couple of light NIST envelope-tier parts.",
+      "description": "Trivial procedural parts. Claude should one-shot these with the current skill; if it can't, the skill is broken.",
       "brief_ids": [
         "seed_01_box_40_30_20",
         "seed_02_cube_25",
@@ -23,30 +23,23 @@
       ]
     },
     "medium": {
-      "description": "NIST and Model Mania envelope tier — render + bbox envelope, no GD&T. Tests shape replication without dimensional rigor.",
+      "description": "Envelope tier — render + bbox envelope, no GD&T. Tests shape replication without dimensional rigor. Mix of NIST and Model Mania.",
       "brief_ids": [
-        "nist_ctc_04_envelope",
-        "nist_ctc_05_envelope",
-        "nist_ftc_06_envelope",
-        "nist_ftc_09_envelope",
         "mm_2019_phase1_envelope",
         "mm_2021_phase1_envelope",
         "mm_2025_phase1_envelope",
-        "mm_2026_jan_envelope"
+        "mm_2026_jan_envelope",
+        "nist_ctc_04_envelope",
+        "nist_ftc_06_envelope"
       ]
     },
     "hard": {
-      "description": "Engineering drawing tier with real GD&T. Agent must read the drawing sheet and reproduce dimensions + tolerances. All NIST drawing briefs plus Model Mania drawing briefs.",
+      "description": "Engineering drawing tier — Model Mania challenge problems with realistic dimension callouts. NIST PMI dropped per ruling 2026-04-18 (designed for PMI software extraction tests, not LLM agent evaluation; callouts too tortuous to be informative). One NIST included (ctc_01) as a stretch.",
       "brief_ids": [
-        "nist_ctc_01_drawing",
-        "nist_ctc_02_drawing",
-        "nist_ctc_03_drawing",
-        "nist_ctc_04_drawing",
-        "nist_ftc_06_drawing",
-        "nist_ftc_09_drawing",
         "mm_2019_phase1_drawing",
         "mm_2021_phase1_drawing",
-        "mm_2025_phase1_drawing"
+        "mm_2025_phase1_drawing",
+        "nist_ctc_01_drawing"
       ]
     }
   }

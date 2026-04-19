@@ -38,6 +38,7 @@ from .api.entities import EntityManager
 from .api.describe import DescribeManager
 from .api.measurements import MeasurementManager
 from .api.custom_features import CustomFeatureManager, DEFAULT_FS_VERSION
+from .api.drawing_ocr import callouts_to_dict, extract_callouts
 from .api.rendering import (
     ShadedViewManager,
     compose_reference_comparison,
@@ -1676,6 +1677,29 @@ async def list_tools() -> list[Tool]:
                     "edges": {"type": "boolean", "default": True},
                 },
                 "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="extract_drawing_dimensions",
+            description=(
+                "OCR a drawing PNG and return every numeric callout it can read, "
+                "grouped by kind: length / radius / diameter / thread / angle / "
+                "count / scale. Each callout includes pixel-position so you can map "
+                "it to a specific feature in the drawing (compare against your view "
+                "of the image). USE THIS BEFORE READING DIMS BY EYE — Tesseract is "
+                "more reliable than your vision pass on small text. Known limit: "
+                "Ø often misreads as '9' (e.g. 'Ø50' → '950'); cross-check "
+                "high-significance dims with crop_image at native resolution."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "imagePath": {
+                        "type": "string",
+                        "description": "Filesystem path to a drawing PNG.",
+                    },
+                },
+                "required": ["imagePath"],
             },
         ),
         Tool(
@@ -4462,6 +4486,34 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             ]
         except Exception as e:
             return [TextContent(type="text", text=f"Render failed: {e}")]
+
+    elif name == "extract_drawing_dimensions":
+        try:
+            callouts = extract_callouts(arguments["imagePath"])
+            payload = callouts_to_dict(callouts)
+            n = len(callouts)
+            by_kind = payload["by_kind"]
+            summary_lines = [
+                f"Extracted {n} numeric callouts from {arguments['imagePath']}.",
+                "",
+                "BY KIND (use these as the candidate dimensions for your build):",
+            ]
+            for kind in ("length", "radius", "diameter", "thread", "angle", "count", "scale"):
+                vals = by_kind.get(kind, [])
+                if vals:
+                    summary_lines.append(f"  {kind}: {vals}")
+            summary_lines.append("")
+            summary_lines.append("FULL TABLE (text @ pixel-x,y, conf):")
+            for c in callouts:
+                summary_lines.append(
+                    f"  [{c.kind:>9}] {c.text!r:<28} @ ({c.x},{c.y}) conf={c.confidence:.0f}"
+                )
+            return [TextContent(type="text", text="\n".join(summary_lines))]
+        except FileNotFoundError as e:
+            return [TextContent(type="text", text=f"extract_drawing_dimensions: {e}")]
+        except Exception as e:
+            logger.exception("extract_drawing_dimensions failed")
+            return [TextContent(type="text", text=f"extract_drawing_dimensions failed: {e}")]
 
     elif name == "load_local_image":
         try:

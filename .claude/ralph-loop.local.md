@@ -1,6 +1,6 @@
 ---
 active: true
-iteration: 5
+iteration: 10
 session_id: 
 max_iterations: 50
 completion_promise: null
