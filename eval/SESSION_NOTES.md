@@ -217,3 +217,40 @@ ones we still get are actually-stuck briefs, not just slow ones.
 
 **Keep v001 as best-of-breed.** Current best for mutation tree:
   v001-plan-from-render (mean 0.193 over 2 clean runs)
+
+## 2026-04-18 — v003 reverted; SKILL.md-text plateau hypothesis
+
+v003 (per-feature render-compare loop) on medium:
+- ctc_04: 0.15  (same)
+- ctc_05: 0.16  (down from v001's 0.29 — regression)
+- ftc_06: 0.15  (same)
+- **mean 0.155** = same as baseline. REVERTED.
+
+Diagnostics:
+- v003 DID call describe_part_studio more: 4/3/5 vs v001's 1/2/2.
+  Mutation landed as intended.
+- **But L4 IoU = 0 on all 3 briefs, every variant, every time.** This is
+  a hard wall. Even with feedback, the agent can't infer exact feature
+  positions from a single iso render.
+- ctc_05 regressed because v003 made the agent build a LARGER volume
+  (19M vs 12.7M ref) to match more features from the render — trading
+  L1 (volume) for more L3 (topology). Neither ended up covering L4.
+
+**Plateau hypothesis: SKILL.md-text mutations cannot break the L4=0
+ceiling on envelope-only medium-tier briefs.** The failure is positional
+accuracy, which depends on either:
+- **Explicit dimensions** → hard tier (drawings with GD&T) might unstick.
+- **Better vision-to-3D inference** → model-level, not prompt-level.
+- **Measurable tool feedback** → would need harness changes (Phase 5+).
+
+Scoreboard update:
+  baseline      : 0.155  (n=1)
+  v001          : 0.193  (n=2 clean, KEPT as best)
+  v002          : 0.189  (n=1) REVERTED
+  v003          : 0.155  (n=1) REVERTED
+
+**Next:** sample hard tier at baseline to see if drawings unstick the
+L4=0 wall. If they do, SKILL mutations are useful there; if they
+don't, the wall is positional accuracy overall and we should expand
+mutation scope to server.py _INSTRUCTIONS (Phase 5) or add tool-level
+help (a sanity-check measure? a harness hint?).
