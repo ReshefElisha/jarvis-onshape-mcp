@@ -460,3 +460,44 @@ slightly off, having torus/cone faces present would lift L3 topology
 Combined with the OCR dim-extract harness pre-fill (v009's idea, just
 not tested due to API slowness tonight), this could be a productive
 v010 in a future session.
+
+## 2026-04-19 — pivot to vision sub-skill (in progress, untested)
+
+Shef reviewed build outputs vs references side-by-side and called it:
+the bottleneck is image understanding, not CAD generation. A post-build
+polish pass wouldn't help when the agent got the base shape topology
+wrong (hex sitting ON instead of IN, T-extensions missing entirely,
+giant through-holes instead of bolt-hole-within-boss, etc.).
+
+Shef's proposed fix: a vision-only sub-skill that does rigorous zoom/
+pan/describe BEFORE any CAD. NOT a one-shot Gemini-style description
+(he tried that, it was worse than nothing). Structured multi-pass:
+overview → count → zoom into each feature → describe role/size/
+position → self-check coverage.
+
+Briefly considered: use Haiku 4.5 to offload vision (cheaper, faster).
+REJECTED per Shef: "the whole premise of building this is that Claude
+Opus 4.7 is better at visual reasoning." Downgrading the vision model
+undermines the bet. Keep Opus 4.7 for both phases, separate context.
+
+**Shipped this commit:**
+- `eval/skills/vision/SKILL.md` — sub-skill: hard rules (no build, no
+  Onshape mutation), mandatory output format (OVERVIEW/ENVELOPE/TREE/
+  RELATIONSHIPS/UNCERTAINTIES), workflow (overview → count → crop each
+  → self-check → output), scope discipline (minimal allowlist).
+- `eval/runner/run_vision.py` — standalone runner. Same Claude Agent
+  SDK + Onshape MCP server (for load_local_image/crop_image), but
+  disallowed_tools wildcards out all mutation/build/describe/measure
+  tools. 30-turn cap. Final spec → `eval/vision_outputs/<brief_id>.txt`.
+- `eval/tests/test_vision_<brief_id>.sh` × 30 — one per non-seed brief.
+  Shef can run any of them standalone to manually check what the
+  vision agent produces before we plumb the specs into CAD runs.
+
+**Status**: Imports work, prompt composition smoke-tests. NO actual
+test run yet — Shef wants to manually inspect vision outputs first.
+He said "take extremely good notes as I'm about to compact you" —
+hence eval/NEXT.md got a full pre-compaction handoff doc.
+
+**Plumbing to CAD still TODO** — vision spec is saved to a file; the
+CAD runner does NOT yet prepend it to phase-2 prompts. Leave this
+until vision quality is validated.

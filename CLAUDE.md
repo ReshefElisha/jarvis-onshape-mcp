@@ -33,6 +33,34 @@ Karpathy's load-bearing rules we DO keep:
 
 ---
 
+## Current pivot (Shef 2026-04-19): vision decomposition is the bottleneck
+
+Session to-date finding: after 8 variants, **Opus 4.7's visual reasoning
+about engineering drawings is the bottleneck**, not CAD generation. When
+Opus correctly decomposes the reference, it builds a decent part. When it
+misreads the image, it builds something unrelated. v001 is the only kept
+SKILL mutation (+0.04 medium tier, 4× above noise).
+
+New architecture (shipped, untested end-to-end):
+- **Vision sub-agent** (`eval/runner/run_vision.py`) — separate SDK session
+  with ONLY `load_local_image` + `crop_image`. Opus 4.7 (same model —
+  NOT Haiku per Shef's premise). Produces a structured feature tree.
+- **Vision sub-skill** (`eval/skills/vision/SKILL.md`) — dictates the
+  OVERVIEW/ENVELOPE/FEATURE-TREE/RELATIONSHIPS/UNCERTAINTIES output.
+- **CLI test scripts** (`eval/tests/test_vision_<brief>.sh`) — one per
+  non-seed brief. Shef runs them manually to verify spec quality
+  before we wire the spec into the CAD runner.
+
+**Next step**: Shef manually runs a handful of `test_vision_*.sh`, reviews
+the specs, tells us if the vision quality is worth plumbing into phase-2
+CAD runs. Do NOT auto-plumb before his review — premise of this whole
+architectural bet is that vision description works; if the specs are
+garbage, we learn something else is broken.
+
+See `eval/NEXT.md` for the full pre-compaction handoff.
+
+---
+
 ---
 
 ## Quickstart: your literal first 10 minutes
