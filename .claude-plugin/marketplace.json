@@ -1,0 +1,14 @@
+{
+  "name": "jarvis-onshape-mcp",
+  "owner": {
+    "name": "Reshef Elisha",
+    "url": "https://github.com/ReshefElisha"
+  },
+  "plugins": [
+    {
+      "name": "jarvis-onshape-mcp",
+      "source": ".",
+      "description": "Jarvis Onshape MCP — Claude Code plugin for driving real Onshape CAD. Vision-decomposition skill, truth-telling on every mutation, parametric iteration, FeatureScript custom features."
+    }
+  ]
+}
