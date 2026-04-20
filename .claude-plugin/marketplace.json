@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "jarvis-onshape-mcp",
-      "source": ".",
+      "source": "./",
       "description": "Jarvis Onshape MCP — Claude Code plugin for driving real Onshape CAD. Vision-decomposition skill, truth-telling on every mutation, parametric iteration, FeatureScript custom features."
     }
   ]
