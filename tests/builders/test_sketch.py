@@ -189,25 +189,19 @@ class TestSketchBuilderCircle:
         result = sketch.add_circle(center=(5, 5), radius=3)
         assert result is sketch
 
-    def test_add_circle_creates_two_arcs(self):
+    def test_add_circle_creates_single_entity(self):
+        """Full circles emit ONE BTMSketchCurve-4 entity with BTCurveGeometryCircle-115
+        geometry. Replaces the legacy two-arc workaround — `circle.N.center`
+        now resolves as a real sub-point ref."""
         sketch = SketchBuilder()
         sketch.add_circle(center=(5, 5), radius=3)
-        assert len(sketch.entities) == 2
-
-        for entity in sketch.entities:
-            assert entity["btType"] == "BTMSketchCurveSegment-155"
-            assert entity["geometry"]["btType"] == "BTCurveGeometryCircle-115"
-            assert entity["isConstruction"] is False
-
-    def test_add_circle_arcs_form_full_circle(self):
-        sketch = SketchBuilder()
-        sketch.add_circle(center=(0, 0), radius=1)
-
-        arc1, arc2 = sketch.entities
-        assert arc1["startParam"] == 0.0
-        assert abs(arc1["endParam"] - math.pi) < 1e-10
-        assert abs(arc2["startParam"] - math.pi) < 1e-10
-        assert abs(arc2["endParam"] - 2.0 * math.pi) < 1e-10
+        assert len(sketch.entities) == 1
+        e = sketch.entities[0]
+        assert e["btType"] == "BTMSketchCurve-4"
+        assert e["geometry"]["btType"] == "BTCurveGeometryCircle-115"
+        assert e["isConstruction"] is False
+        # centerId exposed so constraints can reference .center sub-point.
+        assert e["centerId"].endswith(".center")
 
     def test_add_circle_bare_numbers_are_mm_default(self):
         """Under the unit convention, bare numeric coords are mm (not inches)."""
@@ -230,18 +224,23 @@ class TestSketchBuilderCircle:
         assert abs(geo["yCenter"] - 2.0 * 0.0254) < 1e-10
         assert abs(geo["radius"] - 3.0 * 0.0254) < 1e-10
 
-    def test_add_circle_adds_coincident_constraints(self):
+    def test_add_circle_emits_single_entity(self):
+        """Single-entity circle (BTMSketchCurve-4 with BTCurveGeometryCircle-115)
+        matches UI-built sketches. The legacy two-arc workaround no longer
+        applies — `circle.N.center` now resolves as a sub-point ref."""
         sketch = SketchBuilder()
         sketch.add_circle(center=(0, 0), radius=1)
-        assert len(sketch.constraints) == 2
-        assert sketch.constraints[0]["constraintType"] == "COINCIDENT"
-        assert sketch.constraints[1]["constraintType"] == "COINCIDENT"
+        assert len(sketch.entities) == 1
+        assert sketch.entities[0]["btType"] == "BTMSketchCurve-4"
+        assert sketch.entities[0]["geometry"]["btType"] == "BTCurveGeometryCircle-115"
+        # No closing COINCIDENTs needed with a single full-circle entity.
+        assert all(c.get("constraintType") != "COINCIDENT" for c in sketch.constraints)
 
     def test_add_circle_construction(self):
         sketch = SketchBuilder()
         sketch.add_circle(center=(0, 0), radius=1, is_construction=True)
+        assert len(sketch.entities) == 1
         assert sketch.entities[0]["isConstruction"] is True
-        assert sketch.entities[1]["isConstruction"] is True
 
     def test_add_circle_variable_radius_emits_radius_constraint(self):
         """variable_radius adds a RADIUS dimensional constraint with `#<var>`."""
@@ -283,12 +282,11 @@ class TestSketchBuilderCircle:
         """Back-compat: calls that skip the new args don't gain spurious constraints."""
         sketch = SketchBuilder()
         sketch.add_circle(center=(0, 0), radius=1)
-        # The only constraints a plain circle creates are the two coincidents
-        # that close the two semicircles — no RADIUS or DISTANCE.
+        # Single-entity circle needs zero constraints to close.
         kinds = [c.get("constraintType") for c in sketch.constraints]
-        assert kinds.count("COINCIDENT") == 2
         assert "RADIUS" not in kinds
         assert "DISTANCE" not in kinds
+        assert "COINCIDENT" not in kinds
 
 
 class TestSketchBuilderArc:
@@ -320,6 +318,42 @@ class TestSketchBuilderArc:
         sketch = SketchBuilder()
         sketch.add_arc(center=(0, 0), radius=1, is_construction=True)
         assert sketch.entities[0]["isConstruction"] is True
+
+    def test_arc_spec_short_arc_default_flips_long_ccw_sweep(self):
+        """Peer ot0309vt clevis dogfood #3: seed start=38°, end=322° (CCW
+        sweep 284°) should auto-flip to the 76° short arc when the default
+        short_arc=True applies."""
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "38 deg", "end_angle": "322 deg",
+        })
+        # Short arc: start+end got swapped so CCW sweep is ≤ 180°.
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert sweep <= math.pi, f"expected short arc (≤π sweep); got {sweep}"
+
+    def test_arc_spec_short_arc_false_preserves_long_sweep(self):
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "38 deg", "end_angle": "322 deg",
+            "short_arc": False,
+        })
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert sweep > math.pi, f"expected long arc (>π sweep); got {sweep}"
+
+    def test_arc_spec_short_arc_noop_when_sweep_already_short(self):
+        """If the user's sweep is already ≤180°, short_arc default is a no-op."""
+        from onshape_mcp.builders.sketch import serialize_entity_spec
+        import math
+        arc = serialize_entity_spec({
+            "type": "arc", "id": "a", "center": [0, 0], "radius": "10 mm",
+            "start_angle": "0 deg", "end_angle": "90 deg",
+        })
+        sweep = (arc["endParam"] - arc["startParam"]) % (2 * math.pi)
+        assert abs(sweep - math.pi / 2) < 1e-9
 
     def test_add_arc_variable_radius_emits_radius_constraint(self):
         sketch = SketchBuilder()
@@ -469,8 +503,8 @@ class TestSketchBuilderPolygon:
         sketch.add_circle((5, 2.5), 1)
         sketch.add_line((0, 0), (10, 5))
 
-        # 4 rect lines + 2 circle arcs + 1 line
-        assert len(sketch.entities) == 7
+        # 4 rect lines + 1 single-entity circle + 1 line
+        assert len(sketch.entities) == 6
 
         result = sketch.build()
-        assert len(result["feature"]["entities"]) == 7
+        assert len(result["feature"]["entities"]) == 6

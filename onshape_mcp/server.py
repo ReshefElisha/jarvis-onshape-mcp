@@ -89,7 +89,10 @@ call.
 - delete_document / delete_feature / delete_feature_by_name — cleanup
 
 ### Sketching
-- create_sketch — multi-primitive (rectangles + circles + lines + arcs in one feature)
+- create_sketch — multi-primitive sketch. Two modes:
+  * coordinate-first (no `id` on entities) — hand-compute positions, fast for 1-3 obvious primitives
+  * constraint-first (each entity has an `id`, plus top-level `constraints[]`) — solver-driven, for drawings with tangencies / dimensions / concentricities. 14 constraint types supported.
+- edit_sketch — iterate on an existing sketch. addEntities/addConstraints/removeIds; cascade-removes constraints that reference a removed entity, reports cascaded_removals structurally.
 - create_sketch_rectangle / _rounded_rectangle_sketch — single rect fast path
 - create_sketch_circle / _line / _arc — single primitives
 
@@ -148,6 +151,7 @@ list_entities, or from create_offset_plane).
 - Variable Studios are separate elements — `create_variable_studio` first, then `set_variable` / `get_variables` target that element, NOT the Part Studio elementId.
 - Deterministic face/edge IDs are stable across feature edits, but NEW features may remap them — always re-run `list_entities` or `describe_part_studio` after a mutation before referencing picked geometry.
 - First mutating call on a Part Studio typically auto-creates a sketch on a datum; chain a sketch BEFORE attempting a feature that references geometry.
+- Constraint-first `create_sketch`: `HORIZONTAL`/`VERTICAL` work on LINE entities only (on a point, use `DISTANCE(direction=VERTICAL, value="0 mm")` to pin to the horizontal axis). There is NO magic `origin` keyword — add a `{type:"point", id:"origin", at:[0,0]}` entity if you need a sketch-local anchor for parametric resize. Circles/arcs need center+radius SEEDS even when a constraint will drive final values. `POINT_ON` is not a separate type — use `COINCIDENT` with a point sub-ref.
 """
 
 app = Server("onshape-mcp", instructions=_INSTRUCTIONS)
@@ -1108,25 +1112,64 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="create_sketch",
             description=(
-                "Create ONE sketch feature containing many entities at once. "
-                "Use this whenever you need >1 primitive on the same plane/face "
-                "(e.g. plate outline + 4 mounting holes, NEMA bolt patterns, etc.) "
-                "to avoid feature-tree bloat -- 5 holes = 1 feature here vs 5 with "
-                "the per-primitive tools. The per-primitive tools "
-                "(create_sketch_rectangle/circle/line/arc) stay available as fast "
-                "paths for one-shot sketches.\n\n"
-                "Sketch location: pass either `plane` (Front/Top/Right) or `faceId` "
-                "(from `list_entities`). `faceId` wins when both are given.\n\n"
-                "`entities` is an array of mixed primitives. Each item carries a "
-                "`type` discriminator and the type-specific args:\n"
+                "Create ONE sketch feature atomically. Two surfaces in one tool:\n\n"
+                "**Coordinate-first** (legacy, for simple sketches): pass entity "
+                "dicts without `id` and no `constraints`. The builder hand-computes "
+                "positions from your coordinates. Fast for 1–3 primitives where "
+                "you already know where everything goes.\n\n"
+                "**Constraint-first** (for drawing transcription): give each "
+                "entity a user-level `id`, list real-world `constraints` between "
+                "them, and let Onshape's solver resolve positions. This is how "
+                "the UI works and how engineering drawings are specified.\n\n"
+                "Sketch location: pass either `plane` (Front/Top/Right) or "
+                "`faceId` (from `list_entities` or the feature_id of a "
+                "create_offset_plane). `faceId` wins when both are given.\n\n"
+                "### Coordinate-first entity types\n"
                 "  rectangle:         {type, corner1:[x,y], corner2:[x,y], variableWidth?, variableHeight?}\n"
                 "  rounded_rectangle: {type, corner1:[x,y], corner2:[x,y], cornerRadius}\n"
                 "  circle:            {type, center:[x,y], radius, variableRadius?, variableCenter?:[xv,yv]}\n"
                 "  line:              {type, start:[x,y], end:[x,y]}\n"
-                "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n"
-                "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" for "
-                "explicit units. Arc startAngle/endAngle default to DEGREES — "
-                "pass strings like \"1.5 rad\" when you need radians."
+                "  arc:               {type, center:[x,y], radius, startAngle?, endAngle?, variableRadius?, variableCenter?:[xv,yv]}\n\n"
+                "### Constraint-first entity types (require `id`)\n"
+                "  line:   {type:'line',   id, start:[x,y]?, end:[x,y]?, construction?}\n"
+                "  circle: {type:'circle', id, center:[x,y], radius, construction?}\n"
+                "  arc:    {type:'arc',    id, center:[x,y], radius, start_angle?, end_angle?, short_arc?, construction?}\n"
+                "           — `short_arc` defaults true: if CCW sweep > 180° the "
+                "builder silently swaps endpoints so the arc goes the short way "
+                "(matches Onshape UI's three-point-arc default). Set false for "
+                "the explicit long-way case.\n"
+                "  point:  {type:'point',  id, at:[x,y]?, construction?}\n\n"
+                "Circle / arc SEEDS (center + radius) are required even when "
+                "a DIAMETER or RADIUS constraint will drive the final value — "
+                "Onshape's solver needs a starting guess. Line start/end are "
+                "optional; seed to [0,0] when omitted and let COINCIDENT / "
+                "TANGENT constraints pull endpoints into position.\n\n"
+                "### Constraints (constraint-first surface only)\n"
+                "Each item: {type, entities?:[id,...] | entity?:id, value?, direction?}.\n"
+                "Entity refs are ids, optionally with a sub-point suffix:\n"
+                "  `line.start`, `line.end`, `circle.center`, `arc.center`\n"
+                "Supported types:\n"
+                "  Entity-ref only: HORIZONTAL, VERTICAL (LINES ONLY — not points), "
+                "COINCIDENT, TANGENT, CONCENTRIC, PARALLEL, PERPENDICULAR, EQUAL, MIDPOINT\n"
+                "  Dimensioned: DIAMETER, RADIUS, DISTANCE (add `direction: HORIZONTAL|VERTICAL|MINIMUM`), "
+                "ANGLE (value in degrees by default — string \"90 deg\" / \"1.57 rad\" for explicit units)\n"
+                "  Binary pair: OFFSET (offset entity + master — pair it with a DISTANCE "
+                "constraint on the same two for the offset length)\n"
+                "Aliases: HORIZONTAL_DISTANCE → DISTANCE(direction=HORIZONTAL), "
+                "VERTICAL_DISTANCE → DISTANCE(direction=VERTICAL), "
+                "LENGTH → DISTANCE(direction=MINIMUM) (for line-length or "
+                "slot end-to-end dimensions).\n"
+                "POINT_ON is NOT a separate type — use COINCIDENT with a point sub-ref.\n\n"
+                "### Pinning to the sketch origin\n"
+                "There is no magic `origin` keyword. To anchor geometry to "
+                "the sketch plane origin (prevents drift on parametric "
+                "resize), add a point entity at [0,0] and COINCIDENT to it:\n"
+                "  entities: [{id:'origin', type:'point', at:[0,0]}, ...]\n"
+                "  constraints: [{type:'COINCIDENT', entities:['hub.center', 'origin']}, ...]\n"
+                "This gives you a sketch-local anchor the solver treats as "
+                "fixed.\n\n"
+                "Bare numbers are mm; pass strings like \"10 mm\" / \"0.5 in\" "
+                "for explicit units."
             ),
             inputSchema={
                 "type": "object",
@@ -1147,13 +1190,42 @@ async def list_tools() -> list[Tool]:
                     "entities": {
                         "type": "array",
                         "minItems": 1,
-                        "description": "Mixed list of sketch primitives keyed by `type`.",
+                        "description": "Mixed list of sketch primitives. Presence of `id` on an entity switches to the constraint-first surface (single-entity circles / arcs / lines + solver-driven positions). See tool description for per-type fields.",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "enum": ["rectangle", "rounded_rectangle", "circle", "line", "arc"],
+                                    "enum": [
+                                        "rectangle",
+                                        "rounded_rectangle",
+                                        "circle",
+                                        "line",
+                                        "arc",
+                                        "point",
+                                    ],
+                                },
+                                "id": {"type": "string"},
+                            },
+                            "required": ["type"],
+                        },
+                    },
+                    "constraints": {
+                        "type": "array",
+                        "description": "Constraint-first sketch solver directives. Each item: {type, entities?:[id,...] | entity?:id, value?, direction?}. See tool description for supported types + entity-ref syntax.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "entities": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "entity": {"type": "string"},
+                                "value": {"type": ["string", "number"]},
+                                "direction": {
+                                    "type": "string",
+                                    "enum": ["MINIMUM", "HORIZONTAL", "VERTICAL"],
                                 },
                             },
                             "required": ["type"],
@@ -1161,6 +1233,70 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "entities"],
+            },
+        ),
+        Tool(
+            name="edit_sketch",
+            description=(
+                "Iterate on an existing sketch without rebuilding it. Pass any "
+                "of `addEntities`, `addConstraints`, `removeIds` and the server "
+                "fetches the current BTMSketch-151, splices the lists, and "
+                "re-POSTs. Use this for the second/third pass on a sketch "
+                "(adding a hole pattern after the outline lands; tightening a "
+                "constraint after a regen check) instead of delete+recreate.\n\n"
+                "Add semantics are STRICT: every entity/constraint dict must "
+                "carry a non-empty `id` string and ids may not collide with "
+                "anything already on the wire. To retarget an id, removeIds "
+                "it first and then addEntities it back.\n\n"
+                "removeIds is a single bag matched against entity ids AND "
+                "constraint ids. Cascade: any constraint whose `entities`/"
+                "`entity` (or sub-point ref like `line1.start`) names an "
+                "entity in removeIds is auto-dropped and reported back in "
+                "`cascaded_removals` so you see exactly what got pulled."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "sketchFeatureId": {
+                        "type": "string",
+                        "description": "featureId of the sketch to edit (from a prior create_sketch).",
+                    },
+                    "addEntities": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Entity dicts to append. Each must carry a unique "
+                            "`id` plus the type-specific fields the constraint-"
+                            "first sketch surface accepts."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "addConstraints": {
+                        "type": "array",
+                        "default": [],
+                        "description": (
+                            "Constraint dicts to append. Each must carry a "
+                            "unique `id`. Reference entities by user-supplied "
+                            "`id` (e.g. `\"entities\": [\"line1\", \"circle1\"]`) "
+                            "or sub-points (`\"line1.start\"`)."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "removeIds": {
+                        "type": "array",
+                        "default": [],
+                        "items": {"type": "string"},
+                        "description": (
+                            "User ids to drop. Matches entities AND constraints. "
+                            "Constraints referencing a removed entity cascade "
+                            "out and are reported in cascaded_removals."
+                        ),
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId"],
             },
         ),
         # === Feature Tools ===
@@ -2127,6 +2263,33 @@ def _enum_specific_hints(error_message: Optional[str]) -> list[str]:
             "for the missing #name BEFORE re-applying the sketch -- otherwise "
             "the dimension keeps falling back to its literal seed and the "
             "parametric binding silently drops."
+        )
+
+    # SKETCH_SOLVE_FAILED / SKETCH_UNSOLVABLE_CONSTRAINT: the solver couldn't
+    # satisfy the constraint set. Onshape's API does NOT surface per-constraint
+    # diagnostics anywhere in the response (live-probed 2026-04-18; featureState
+    # is just WARNING with no detail, entity geometry is still the seed values).
+    # Best recovery is client-side bisection — remove half the added constraints
+    # via edit_sketch.removeIds, re-POST; binary search narrows the offender
+    # in log(N) turns. Typical culprits: mutually exclusive pairs (PARALLEL +
+    # PERPENDICULAR on same entity pair), redundant positional constraints
+    # (COINCIDENT chain over-specifying endpoints), or an arc whose endpoints
+    # are already pinned by tangent lines to different circles.
+    if ("SKETCH_SOLVE_FAILED" in error_message
+            or "SKETCH_UNSOLVABLE_CONSTRAINT" in error_message):
+        hits.append(
+            "SKETCH_SOLVE_FAILED / SKETCH_UNSOLVABLE_CONSTRAINT: Onshape's solver "
+            "couldn't satisfy the constraint set. Onshape's REST API does NOT "
+            "return per-constraint diagnostics — silence here is a platform "
+            "limit, not a missing feature. Recovery: use edit_sketch with "
+            "removeIds to bisect. Remove ~half the last-added constraint ids, "
+            "re-POST; whichever half regens is the safe half, repeat on the "
+            "failing half. Most common triggers: mutually exclusive pairs "
+            "(PARALLEL + PERPENDICULAR on the same pair of lines), redundant "
+            "positional constraints (COINCIDENT chain over-specifying endpoints), "
+            "or tangent lines forcing an arc into an impossible geometry. "
+            "Always give each addConstraint an explicit `id` so bisection is "
+            "tractable."
         )
 
     return hits
@@ -3342,7 +3505,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             part_studio_name: Optional[str] = None
             try:
                 workspaces = await document_manager.get_workspaces(doc.id)
-                main_ws = next((w for w in workspaces if w.isMain), None) or (
+                # WorkspaceInfo uses `is_main` as the Python field name
+                # (aliased from Onshape's `isMain` JSON). Pydantic v2
+                # doesn't expose the alias as an attribute on the
+                # instance, so use the python name.
+                main_ws = next((w for w in workspaces if w.is_main), None) or (
                     workspaces[0] if workspaces else None
                 )
                 if main_ws:
@@ -3785,6 +3952,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             for i, ent in enumerate(entities):
                 if not isinstance(ent, dict):
                     raise ValueError(f"entities[{i}] must be an object, got {type(ent).__name__}")
+                # Constraint-first path: if the entity carries an `id`, it's
+                # the new spec shape and goes through the constraint-aware
+                # serializer (single-entity circles/arcs, user-supplied ids).
+                if ent.get("id"):
+                    sketch.add_entity_spec(ent)
+                    continue
                 etype = (ent.get("type") or "").lower()
                 if etype == "rectangle":
                     sketch.add_rectangle(
@@ -3838,6 +4011,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                         f"got {ent.get('type')!r}"
                     )
 
+            # Top-level constraints array — constraint-first surface.
+            for i, cspec in enumerate(arguments.get("constraints") or []):
+                if not isinstance(cspec, dict):
+                    raise ValueError(
+                        f"constraints[{i}] must be an object, got {type(cspec).__name__}"
+                    )
+                sketch.add_constraint_spec(cspec)
+
             result = await apply_feature_and_check(
                 client,
                 arguments["documentId"],
@@ -3850,6 +4031,48 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error creating multi-entity sketch")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "edit_sketch":
+        try:
+            from onshape_mcp.api.sketch_edit import edit_sketch as _edit_sketch
+            result = await _edit_sketch(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["sketchFeatureId"],
+                add_entities=arguments.get("addEntities") or [],
+                add_constraints=arguments.get("addConstraints") or [],
+                remove_ids=arguments.get("removeIds") or [],
+            )
+            apply = result.apply
+            payload = {
+                "ok": apply.ok,
+                "status": apply.status,
+                "feature_id": apply.feature_id,
+                "feature_type": apply.feature_type,
+                "feature_name": apply.feature_name,
+                "error_message": apply.error_message,
+                "added_entity_ids": result.added_entity_ids,
+                "added_constraint_ids": result.added_constraint_ids,
+                "removed_entity_ids": result.removed_entity_ids,
+                "removed_constraint_ids": result.removed_constraint_ids,
+                "cascaded_removals": [
+                    {"constraint_id": c.constraint_id, "referenced": c.referenced}
+                    for c in result.cascaded_removals
+                ],
+                "tool": "edit_sketch",
+            }
+            # Use the standard hint surface so enum-specific advice
+            # (SKETCH_DIMENSION_MISSING_PARAMETER etc.) still fires on
+            # this path.
+            payload["hints"] = _hints_for_result(apply)
+            return [TextContent(type="text", text=json.dumps(payload, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error editing sketch")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fillet":
