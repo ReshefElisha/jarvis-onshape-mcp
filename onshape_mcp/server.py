@@ -23,6 +23,8 @@ from .api.partstudio import PartStudioManager
 from .api.variables import VariableManager
 from .api.documents import DocumentManager
 from .builders.sketch import SketchBuilder, SketchPlane
+from .api.sketch_inspect import inspect_sketch as _inspect_sketch_feature, list_sketches as _list_sketches
+from .api.sketch_render import render_sketch_png as _render_sketch_png
 from .builders.extrude import ExtrudeBuilder, ExtrudeEndType, ExtrudeType
 from .builders.thicken import ThickenBuilder, ThickenType
 from .api.assemblies import AssemblyManager
@@ -47,6 +49,7 @@ from .api.rendering import (
     get_image_meta,
     list_cached_image_ids,
     load_local_image,
+    _put_image,
 )
 from .builders.mate import MateBuilder, MateConnectorBuilder, MateType, build_transform_matrix
 from .builders.fillet import FilletBuilder
@@ -1297,6 +1300,102 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId"],
+            },
+        ),
+        Tool(
+            name="inspect_sketch",
+            description=(
+                "Return a compact, structured view of a BTMSketch-151's "
+                "entities and constraints. Use before calling `edit_sketch` "
+                "to learn the entity ids + sub-points (`<id>.start` / `.end` "
+                "/ `.center`) that constraint refs target. Cheaper and easier "
+                "to scan than `get_features`; includes a human-readable text "
+                "block plus machine-readable lists.\n\n"
+                "Locate the sketch by `sketchFeatureId` (preferred), by "
+                "`sketchName`, or — if the element has exactly one sketch — "
+                "omit both."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "sketchFeatureId": {
+                        "type": "string",
+                        "description": "featureId of the target BTMSketch-151 (preferred).",
+                    },
+                    "sketchName": {
+                        "type": "string",
+                        "description": "Sketch name as shown in the feature tree. Used when sketchFeatureId is not given.",
+                    },
+                    "includeRaw": {
+                        "type": "boolean",
+                        "description": "When true, also include the raw BTMSketch-151 JSON under `raw`.",
+                        "default": False,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="render_sketch",
+            description=(
+                "Render a BTMSketch-151 to a 2D PNG (sketch-local mm, looking "
+                "down the sketch normal). Onshape's /shadedviews shows solids "
+                "but not sketch geometry — this plots each line / arc / "
+                "circle / point directly and overlays constraint badges: "
+                "FIX = red square, LENGTH / DIAMETER / RADIUS / DISTANCE = "
+                "green label, HORIZONTAL / VERTICAL = H/V tag.\n\n"
+                "Complements `inspect_sketch` (structured text). Same entity "
+                "ids are labeled on the drawing. Returns an image_id that "
+                "`crop_image` can zoom into."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "sketchFeatureId": {
+                        "type": "string",
+                        "description": "featureId of the target BTMSketch-151 (preferred).",
+                    },
+                    "sketchName": {
+                        "type": "string",
+                        "description": "Sketch name. Used when sketchFeatureId is not given.",
+                    },
+                    "width": {"type": "integer", "default": 1000},
+                    "height": {"type": "integer", "default": 800},
+                    "showLabels": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Label each entity with its id on the drawing.",
+                    },
+                    "showConstraints": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Overlay FIX / dimension / H / V badges.",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
+            },
+        ),
+        Tool(
+            name="list_sketches",
+            description=(
+                "List every sketch in a Part Studio with featureId, name, "
+                "status, and entity / constraint counts. Use to pick the "
+                "right sketch before drilling in with `inspect_sketch`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                },
+                "required": ["documentId", "workspaceId", "elementId"],
             },
         ),
         # === Feature Tools ===
@@ -4073,6 +4172,132 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error editing sketch")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "inspect_sketch":
+        try:
+            features_doc = await partstudio_manager.get_features(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+            )
+            summary = _inspect_sketch_feature(
+                features_doc,
+                sketch_feature_id=arguments.get("sketchFeatureId"),
+                sketch_name=arguments.get("sketchName"),
+            )
+            payload: dict = {
+                "ok": True,
+                "tool": name,
+                "sketch": {
+                    "name": summary["name"],
+                    "feature_id": summary["feature_id"],
+                    "status": summary["status"],
+                    "plane_query": summary["plane_query"],
+                    "entities": summary["entities"],
+                    "constraints": summary["constraints"],
+                },
+                "text": summary["text"],
+            }
+            if arguments.get("includeRaw"):
+                from .api.sketch_inspect import find_sketch as _find_sketch
+                payload["raw"] = _find_sketch(
+                    features_doc,
+                    sketch_feature_id=arguments.get("sketchFeatureId"),
+                    sketch_name=arguments.get("sketchName"),
+                )
+            return [TextContent(type="text", text=json.dumps(payload, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error inspecting sketch")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "render_sketch":
+        try:
+            features_doc = await partstudio_manager.get_features(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+            )
+            summary = _inspect_sketch_feature(
+                features_doc,
+                sketch_feature_id=arguments.get("sketchFeatureId"),
+                sketch_name=arguments.get("sketchName"),
+            )
+            width = int(arguments.get("width", 1000))
+            height = int(arguments.get("height", 800))
+            png = _render_sketch_png(
+                entities=summary["entities"],
+                constraints=summary["constraints"],
+                width=width,
+                height=height,
+                title=f'Sketch "{summary["name"]}" (status={summary["status"]})',
+                show_labels=bool(arguments.get("showLabels", True)),
+                show_constraints=bool(arguments.get("showConstraints", True)),
+            )
+            image_id = _put_image(
+                png,
+                {
+                    "kind": "sketch",
+                    "did": arguments["documentId"],
+                    "wid": arguments["workspaceId"],
+                    "eid": arguments["elementId"],
+                    "sketch_feature_id": summary["feature_id"],
+                    "sketch_name": summary["name"],
+                    "width": width,
+                    "height": height,
+                },
+            )
+            header = TextContent(
+                type="text",
+                text=(
+                    f'Rendered sketch "{summary["name"]}" '
+                    f'({summary["feature_id"]}, status={summary["status"]}) '
+                    f"with {len(summary['entities'])} entities and "
+                    f"{len(summary['constraints'])} constraints. "
+                    f"image_id={image_id} ({width}x{height}, {len(png)}B)."
+                ),
+            )
+            image = ImageContent(
+                type="image",
+                data=base64.b64encode(png).decode("ascii"),
+                mimeType="image/png",
+            )
+            return [header, image]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error rendering sketch")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "list_sketches":
+        try:
+            features_doc = await partstudio_manager.get_features(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+            )
+            sketches = _list_sketches(features_doc)
+            lines = [f"SKETCHES ({len(sketches)}):"]
+            for s in sketches:
+                lines.append(
+                    f"  [{s['status']:5s}] {s['name']:30s} "
+                    f"entities={s['entity_count']:3d} "
+                    f"constraints={s['constraint_count']:3d}  "
+                    f"id={s['feature_id']}"
+                )
+            payload = {
+                "ok": True,
+                "tool": name,
+                "sketches": sketches,
+                "text": "\n".join(lines) if sketches else "SKETCHES: none",
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2, default=str))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error listing sketches")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "create_fillet":
