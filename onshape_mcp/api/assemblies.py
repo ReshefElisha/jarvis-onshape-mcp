@@ -64,6 +64,7 @@ class AssemblyManager:
         is_assembly: bool = False,
         source_document_id: str | None = None,
         source_workspace_id: str | None = None,
+        source_version_id: str | None = None,
     ) -> Dict[str, Any]:
         """Add an instance to an assembly.
 
@@ -77,10 +78,16 @@ class AssemblyManager:
             source_document_id: Document ID containing the part to insert. Defaults
                 to document_id (same-doc insert). Set this for cross-document inserts
                 (e.g. inserting from a public catalog).
-            source_workspace_id: Workspace ID containing the part to insert. Defaults
-                to workspace_id. Required when source_document_id differs from
-                document_id; included in the request body so Onshape can resolve the
-                cross-document reference.
+            source_workspace_id: Workspace ID of the source document. Used only as
+                a hint for resolving the latest published version when
+                source_version_id is not given. Onshape requires linked-document
+                references to be locked to a versionId, not a workspaceId.
+            source_version_id: Version ID of the source document. Required for
+                cross-document inserts because Onshape rejects workspace-only
+                references with "Linked document references require a version
+                identifier". If omitted on a cross-doc insert, this method
+                auto-resolves the latest non-"Start" published version of
+                source_document_id.
 
         Returns:
             API response
@@ -90,8 +97,28 @@ class AssemblyManager:
             f"/instances"
         )
         src_doc = source_document_id or document_id
-        src_ws = source_workspace_id or workspace_id
         is_cross_doc = src_doc != document_id
+
+        if is_cross_doc and not source_version_id:
+            # Onshape requires versionId for cross-doc inserts. Auto-resolve the
+            # latest published version (Onshape returns versions in chronological
+            # order; the implicit "Start" version sits at index 0 with no real
+            # geometry, so pick the newest non-"Start" entry).
+            versions = await self.client.get(
+                f"/api/v9/documents/d/{src_doc}/versions"
+            )
+            published = [
+                v for v in versions
+                if v.get("name") and v["name"] != "Start"
+            ]
+            if not published:
+                raise RuntimeError(
+                    f"Cannot insert from document {src_doc}: no published "
+                    f"versions found. Ask the source document's owner to "
+                    f"create a version (right-click document → Create version)."
+                )
+            source_version_id = published[-1]["id"]
+
         if is_assembly:
             data: Dict[str, Any] = {
                 "documentId": src_doc,
@@ -107,7 +134,7 @@ class AssemblyManager:
                 "isWholePartStudio": part_id is None,
             }
         if is_cross_doc:
-            data["workspaceId"] = src_ws
+            data["versionId"] = source_version_id
         return await self.client.post(path, data=data)
 
     async def delete_instance(

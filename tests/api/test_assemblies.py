@@ -167,13 +167,14 @@ class TestAssemblyManager:
         assert body["documentId"] == sample_document_ids["document_id"]
 
     @pytest.mark.asyncio
-    async def test_add_instance_cross_doc_part(
+    async def test_add_instance_cross_doc_part_with_version(
         self, assembly_manager, onshape_client, sample_document_ids
     ):
-        """Cross-doc insert: body uses sourceDocumentId and includes workspaceId."""
+        """Cross-doc insert with explicit version: body sends versionId, no GET for versions."""
         onshape_client.post = AsyncMock(return_value={"id": "x"})
+        onshape_client.get = AsyncMock(side_effect=AssertionError("should not list versions"))
         src_doc = "src_doc_abc"
-        src_ws = "src_ws_xyz"
+        src_ver = "v_abc123"
         await assembly_manager.add_instance(
             sample_document_ids["document_id"],
             sample_document_ids["workspace_id"],
@@ -181,19 +182,65 @@ class TestAssemblyManager:
             "ps_elem_abc",
             part_id="JPD",
             source_document_id=src_doc,
-            source_workspace_id=src_ws,
+            source_version_id=src_ver,
         )
         body = onshape_client.post.call_args[1]["data"]
         assert body["documentId"] == src_doc
-        assert body["workspaceId"] == src_ws
+        assert body["versionId"] == src_ver
+        assert "workspaceId" not in body
         assert body["partId"] == "JPD"
         assert body["isWholePartStudio"] is False
 
-        # Path still targets the assembly's document/workspace, not the source
         path = onshape_client.post.call_args[0][0]
         assert sample_document_ids["document_id"] in path
-        assert sample_document_ids["workspace_id"] in path
         assert src_doc not in path
+
+    @pytest.mark.asyncio
+    async def test_add_instance_cross_doc_auto_resolves_version(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Cross-doc insert without sourceVersionId auto-resolves latest published version."""
+        onshape_client.post = AsyncMock(return_value={"id": "x"})
+        onshape_client.get = AsyncMock(return_value=[
+            {"id": "v_start", "name": "Start"},
+            {"id": "v_001", "name": "v1.0"},
+            {"id": "v_002", "name": "v2.0"},
+        ])
+        src_doc = "catalog_doc"
+        await assembly_manager.add_instance(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "ps_elem_abc",
+            part_id="JPD",
+            source_document_id=src_doc,
+        )
+        # Picks the latest non-"Start" version
+        body = onshape_client.post.call_args[1]["data"]
+        assert body["versionId"] == "v_002"
+        assert body["documentId"] == src_doc
+        # Verify the versions listing was called with the source doc
+        version_path = onshape_client.get.call_args[0][0]
+        assert src_doc in version_path
+        assert "/versions" in version_path
+
+    @pytest.mark.asyncio
+    async def test_add_instance_cross_doc_no_published_versions_raises(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Source doc with only the implicit Start version -> raise instructive error."""
+        onshape_client.post = AsyncMock(return_value={"id": "x"})
+        onshape_client.get = AsyncMock(return_value=[{"id": "v_start", "name": "Start"}])
+        with pytest.raises(RuntimeError, match="no published versions"):
+            await assembly_manager.add_instance(
+                sample_document_ids["document_id"],
+                sample_document_ids["workspace_id"],
+                sample_document_ids["element_id"],
+                "ps_elem_abc",
+                part_id="JPD",
+                source_document_id="empty_doc",
+            )
+        onshape_client.post.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_add_instance_cross_doc_assembly(
@@ -202,7 +249,7 @@ class TestAssemblyManager:
         """Cross-doc sub-assembly insert: body uses source IDs and isAssembly=True."""
         onshape_client.post = AsyncMock(return_value={"id": "x"})
         src_doc = "catalog_doc"
-        src_ws = "catalog_ws"
+        src_ver = "v_999"
         await assembly_manager.add_instance(
             sample_document_ids["document_id"],
             sample_document_ids["workspace_id"],
@@ -210,11 +257,11 @@ class TestAssemblyManager:
             "sub_asm_elem",
             is_assembly=True,
             source_document_id=src_doc,
-            source_workspace_id=src_ws,
+            source_version_id=src_ver,
         )
         body = onshape_client.post.call_args[1]["data"]
         assert body["documentId"] == src_doc
-        assert body["workspaceId"] == src_ws
+        assert body["versionId"] == src_ver
         assert body["isAssembly"] is True
 
     @pytest.mark.asyncio

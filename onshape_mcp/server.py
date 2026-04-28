@@ -795,7 +795,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "sourceWorkspaceId": {
                         "type": "string",
-                        "description": "Workspace ID of the source document. Defaults to workspaceId. Required when sourceDocumentId differs from documentId.",
+                        "description": "Workspace ID of the source document. Optional. Onshape locks cross-doc references to a versionId; omit and let the tool auto-resolve, or pass sourceVersionId explicitly.",
+                    },
+                    "sourceVersionId": {
+                        "type": "string",
+                        "description": "Version ID of the source document. Optional — when omitted on a cross-doc insert, the tool auto-resolves the latest published version of sourceDocumentId.",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "partStudioElementId"],
@@ -2607,6 +2611,14 @@ def _exception_json(
     msg = str(error)
     if status_code is not None:
         msg = f"HTTP {status_code}: {msg}"
+    response = getattr(error, "response", None)
+    if response is not None:
+        try:
+            body_text = response.text
+        except Exception:
+            body_text = ""
+        if body_text:
+            msg = f"{msg}\nResponse body: {body_text[:1500]}"
     payload: dict[str, Any] = {
         "ok": False,
         "status": "EXCEPTION",
@@ -3795,6 +3807,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 is_assembly=arguments.get("isAssembly", False),
                 source_document_id=arguments.get("sourceDocumentId"),
                 source_workspace_id=arguments.get("sourceWorkspaceId"),
+                source_version_id=arguments.get("sourceVersionId"),
             )
             after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
             after_instances = after.get("rootAssembly", {}).get("instances", [])
