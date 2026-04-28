@@ -769,12 +769,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="add_assembly_instance",
-            description="Add a part or sub-assembly instance to an assembly",
+            description="Add a part or sub-assembly instance to an assembly. Same-doc inserts: omit sourceDocumentId/sourceWorkspaceId. Cross-doc inserts (e.g. from a public catalog): set sourceDocumentId and sourceWorkspaceId to the source doc; documentId/workspaceId still point at the assembly's doc.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "documentId": {"type": "string", "description": "Document ID"},
-                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "documentId": {"type": "string", "description": "Document ID containing the assembly"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID containing the assembly"},
                     "elementId": {"type": "string", "description": "Assembly element ID"},
                     "partStudioElementId": {
                         "type": "string",
@@ -788,6 +788,14 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "Whether to instance an assembly (vs a part studio)",
                         "default": False,
+                    },
+                    "sourceDocumentId": {
+                        "type": "string",
+                        "description": "Document ID containing the part to insert. Defaults to documentId. Set this for cross-document inserts (e.g. inserting from a public catalog).",
+                    },
+                    "sourceWorkspaceId": {
+                        "type": "string",
+                        "description": "Workspace ID of the source document. Defaults to workspaceId. Required when sourceDocumentId differs from documentId.",
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "partStudioElementId"],
@@ -3785,6 +3793,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 part_studio_element_id=arguments["partStudioElementId"],
                 part_id=arguments.get("partId"),
                 is_assembly=arguments.get("isAssembly", False),
+                source_document_id=arguments.get("sourceDocumentId"),
+                source_workspace_id=arguments.get("sourceWorkspaceId"),
             )
             after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
             after_instances = after.get("rootAssembly", {}).get("instances", [])

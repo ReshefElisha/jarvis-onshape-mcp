@@ -62,16 +62,25 @@ class AssemblyManager:
         part_studio_element_id: str,
         part_id: str | None = None,
         is_assembly: bool = False,
+        source_document_id: str | None = None,
+        source_workspace_id: str | None = None,
     ) -> Dict[str, Any]:
         """Add an instance to an assembly.
 
         Args:
-            document_id: Document ID
-            workspace_id: Workspace ID
+            document_id: Document ID containing the assembly
+            workspace_id: Workspace ID containing the assembly
             element_id: Assembly element ID
             part_studio_element_id: Element ID of the Part Studio or Assembly to insert
             part_id: Part ID to insert (None for whole Part Studio)
             is_assembly: Whether the instance is an assembly
+            source_document_id: Document ID containing the part to insert. Defaults
+                to document_id (same-doc insert). Set this for cross-document inserts
+                (e.g. inserting from a public catalog).
+            source_workspace_id: Workspace ID containing the part to insert. Defaults
+                to workspace_id. Required when source_document_id differs from
+                document_id; included in the request body so Onshape can resolve the
+                cross-document reference.
 
         Returns:
             API response
@@ -80,20 +89,25 @@ class AssemblyManager:
             f"/api/v9/assemblies/d/{document_id}/w/{workspace_id}/e/{element_id}"
             f"/instances"
         )
+        src_doc = source_document_id or document_id
+        src_ws = source_workspace_id or workspace_id
+        is_cross_doc = src_doc != document_id
         if is_assembly:
             data: Dict[str, Any] = {
-                "documentId": document_id,
+                "documentId": src_doc,
                 "elementId": part_studio_element_id,
                 "isAssembly": True,
             }
         else:
             data = {
-                "documentId": document_id,
+                "documentId": src_doc,
                 "elementId": part_studio_element_id,
                 "partId": part_id,
                 "isAssembly": False,
                 "isWholePartStudio": part_id is None,
             }
+        if is_cross_doc:
+            data["workspaceId"] = src_ws
         return await self.client.post(path, data=data)
 
     async def delete_instance(

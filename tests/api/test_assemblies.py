@@ -150,6 +150,74 @@ class TestAssemblyManager:
         assert body["isAssembly"] is True
 
     @pytest.mark.asyncio
+    async def test_add_instance_same_doc_omits_workspace_id(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Same-doc insert: body must NOT carry workspaceId (preserves legacy behavior)."""
+        onshape_client.post = AsyncMock(return_value={"id": "x"})
+        await assembly_manager.add_instance(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "ps_elem_abc",
+            part_id="JHD",
+        )
+        body = onshape_client.post.call_args[1]["data"]
+        assert "workspaceId" not in body
+        assert body["documentId"] == sample_document_ids["document_id"]
+
+    @pytest.mark.asyncio
+    async def test_add_instance_cross_doc_part(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Cross-doc insert: body uses sourceDocumentId and includes workspaceId."""
+        onshape_client.post = AsyncMock(return_value={"id": "x"})
+        src_doc = "src_doc_abc"
+        src_ws = "src_ws_xyz"
+        await assembly_manager.add_instance(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "ps_elem_abc",
+            part_id="JPD",
+            source_document_id=src_doc,
+            source_workspace_id=src_ws,
+        )
+        body = onshape_client.post.call_args[1]["data"]
+        assert body["documentId"] == src_doc
+        assert body["workspaceId"] == src_ws
+        assert body["partId"] == "JPD"
+        assert body["isWholePartStudio"] is False
+
+        # Path still targets the assembly's document/workspace, not the source
+        path = onshape_client.post.call_args[0][0]
+        assert sample_document_ids["document_id"] in path
+        assert sample_document_ids["workspace_id"] in path
+        assert src_doc not in path
+
+    @pytest.mark.asyncio
+    async def test_add_instance_cross_doc_assembly(
+        self, assembly_manager, onshape_client, sample_document_ids
+    ):
+        """Cross-doc sub-assembly insert: body uses source IDs and isAssembly=True."""
+        onshape_client.post = AsyncMock(return_value={"id": "x"})
+        src_doc = "catalog_doc"
+        src_ws = "catalog_ws"
+        await assembly_manager.add_instance(
+            sample_document_ids["document_id"],
+            sample_document_ids["workspace_id"],
+            sample_document_ids["element_id"],
+            "sub_asm_elem",
+            is_assembly=True,
+            source_document_id=src_doc,
+            source_workspace_id=src_ws,
+        )
+        body = onshape_client.post.call_args[1]["data"]
+        assert body["documentId"] == src_doc
+        assert body["workspaceId"] == src_ws
+        assert body["isAssembly"] is True
+
+    @pytest.mark.asyncio
     async def test_delete_instance_success(
         self, assembly_manager, onshape_client, sample_document_ids
     ):
