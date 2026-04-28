@@ -806,6 +806,23 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="delete_assembly_instance",
+            description="Remove an instance from an assembly by its instance ID (the 'id' field returned by get_assembly or add_assembly_instance, e.g. 'MwhOeEXRPNXXs0qPJ'). Use this to clean up unwanted parts, undo a misplaced insert, or remove a duplicate. Mate features that reference the deleted instance are also removed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID containing the assembly"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID containing the assembly"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {
+                        "type": "string",
+                        "description": "Instance ID to delete (the 'id' field from get_assembly's instance list, e.g. 'MwhOeEXRPNXXs0qPJ').",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId"],
+            },
+        ),
+        Tool(
             name="transform_instance",
             description="Apply a RELATIVE transform to an assembly instance. Translations: bare numbers = mm; strings like \"20 mm\" / \"0.5 in\" for explicit units. Rotations: degrees. Note: fails on fixed/grounded instances — use get_assembly_positions to check the 'fixed' flag first.",
             inputSchema={
@@ -3831,6 +3848,60 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error adding instance")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "delete_assembly_instance":
+        try:
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            asm_eid = arguments["elementId"]
+            inst_id = arguments["instanceId"]
+            # Capture the instance's display name before deletion so the
+            # response is informative even though Onshape's DELETE returns {}.
+            before = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            before_instances = before.get("rootAssembly", {}).get("instances", [])
+            target = next(
+                (i for i in before_instances if i.get("id") == inst_id),
+                None,
+            )
+            if target is None:
+                payload = {
+                    "ok": False,
+                    "status": "ERROR",
+                    "instance_id": inst_id,
+                    "instance_name": "",
+                    "error_message": (
+                        f"No instance with id '{inst_id}' in this assembly. "
+                        f"Call get_assembly to list current instance ids."
+                    ),
+                    "tool": name,
+                }
+                return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+            removed_name = target.get("name", "")
+
+            await assembly_manager.delete_instance(doc_id, ws_id, asm_eid, inst_id)
+
+            after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            after_ids = {
+                i.get("id") for i in after.get("rootAssembly", {}).get("instances", [])
+            }
+            still_present = inst_id in after_ids
+            payload = {
+                "ok": not still_present,
+                "status": "OK" if not still_present else "ERROR",
+                "instance_id": inst_id,
+                "instance_name": removed_name,
+                "error_message": (
+                    None if not still_present
+                    else f"Onshape returned 200 but instance {inst_id} is still in the assembly."
+                ),
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error deleting assembly instance")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "transform_instance":
