@@ -769,12 +769,12 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="add_assembly_instance",
-            description="Add a part or sub-assembly instance to an assembly",
+            description="Add a part or sub-assembly instance to an assembly. Same-doc inserts: omit sourceDocumentId/sourceWorkspaceId. Cross-doc inserts (e.g. from a public catalog): set sourceDocumentId and sourceWorkspaceId to the source doc; documentId/workspaceId still point at the assembly's doc.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "documentId": {"type": "string", "description": "Document ID"},
-                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "documentId": {"type": "string", "description": "Document ID containing the assembly"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID containing the assembly"},
                     "elementId": {"type": "string", "description": "Assembly element ID"},
                     "partStudioElementId": {
                         "type": "string",
@@ -789,8 +789,37 @@ async def list_tools() -> list[Tool]:
                         "description": "Whether to instance an assembly (vs a part studio)",
                         "default": False,
                     },
+                    "sourceDocumentId": {
+                        "type": "string",
+                        "description": "Document ID containing the part to insert. Defaults to documentId. Set this for cross-document inserts (e.g. inserting from a public catalog).",
+                    },
+                    "sourceWorkspaceId": {
+                        "type": "string",
+                        "description": "Workspace ID of the source document. Optional. Onshape locks cross-doc references to a versionId; omit and let the tool auto-resolve, or pass sourceVersionId explicitly.",
+                    },
+                    "sourceVersionId": {
+                        "type": "string",
+                        "description": "Version ID of the source document. Optional — when omitted on a cross-doc insert, the tool auto-resolves the latest published version of sourceDocumentId.",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "partStudioElementId"],
+            },
+        ),
+        Tool(
+            name="delete_assembly_instance",
+            description="Remove an instance from an assembly by its instance ID (the 'id' field returned by get_assembly or add_assembly_instance, e.g. 'MwhOeEXRPNXXs0qPJ'). Use this to clean up unwanted parts, undo a misplaced insert, or remove a duplicate. Mate features that reference the deleted instance are also removed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID containing the assembly"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID containing the assembly"},
+                    "elementId": {"type": "string", "description": "Assembly element ID"},
+                    "instanceId": {
+                        "type": "string",
+                        "description": "Instance ID to delete (the 'id' field from get_assembly's instance list, e.g. 'MwhOeEXRPNXXs0qPJ').",
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "instanceId"],
             },
         ),
         Tool(
@@ -833,6 +862,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset (along face normal). Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' when firstFaceId is a CYLINDER, CONE, TORUS, or SPHERE face — CENTROID on a curved face produces a featureStatus ERROR.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -859,6 +898,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' when firstFaceId is a CYLINDER, CONE, TORUS, or SPHERE face (typical for revolute mates around a shaft) — CENTROID on a curved face errors.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -885,6 +934,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' for CYLINDER/CONE/TORUS/SPHERE faces.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -911,6 +970,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'MID_AXIS_POINT' (cylindrical mates pair coaxial cylinders). Override with 'CENTROID' if firstFaceId is a planar face that defines the axis direction.",
+                        "default": "MID_AXIS_POINT",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Default 'MID_AXIS_POINT'.",
+                        "default": "MID_AXIS_POINT",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -937,6 +1006,11 @@ async def list_tools() -> list[Tool]:
                     "offsetX": {"type": ["number", "string"], "description": "X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "offsetY": {"type": ["number", "string"], "description": "Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "offsetZ": {"type": ["number", "string"], "description": "Z offset (along face normal) from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "inferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from faceId. Default 'CENTROID' works for planar faces (connector at face centroid, Z along normal). For CYLINDER, CONE, TORUS, or SPHERE faces, pass 'MID_AXIS_POINT' — the connector lands on the face's axis with Z along the axis. CENTROID on a curved face produces a featureStatus ERROR with no actionable diagnostic from Onshape.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
@@ -2599,6 +2673,14 @@ def _exception_json(
     msg = str(error)
     if status_code is not None:
         msg = f"HTTP {status_code}: {msg}"
+    response = getattr(error, "response", None)
+    if response is not None:
+        try:
+            body_text = response.text
+        except Exception:
+            body_text = ""
+        if body_text:
+            msg = f"{msg}\nResponse body: {body_text[:1500]}"
     payload: dict[str, Any] = {
         "ok": False,
         "status": "EXCEPTION",
@@ -2718,6 +2800,8 @@ async def _create_mate(
     max_limit: float | None = None,
     first_offset: tuple[float, float, float] | None = None,
     second_offset: tuple[float, float, float] | None = None,
+    first_inference_type: str = "CENTROID",
+    second_inference_type: str = "CENTROID",
 ) -> FeatureApplyResult:
     """Create a mate between two instances using explicit mate connectors.
 
@@ -2746,6 +2830,7 @@ async def _create_mate(
         name=f"{mate_name} - MC1",
         face_id=first_face_id,
         occurrence_path=[first_instance_id],
+        inference_type=first_inference_type,
     )
     if first_offset:
         mc1.set_translation(*first_offset)
@@ -2760,6 +2845,7 @@ async def _create_mate(
         name=f"{mate_name} - MC2",
         face_id=second_face_id,
         occurrence_path=[second_instance_id],
+        inference_type=second_inference_type,
     )
     if second_offset:
         mc2.set_translation(*second_offset)
@@ -3785,6 +3871,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 part_studio_element_id=arguments["partStudioElementId"],
                 part_id=arguments.get("partId"),
                 is_assembly=arguments.get("isAssembly", False),
+                source_document_id=arguments.get("sourceDocumentId"),
+                source_workspace_id=arguments.get("sourceWorkspaceId"),
+                source_version_id=arguments.get("sourceVersionId"),
             )
             after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
             after_instances = after.get("rootAssembly", {}).get("instances", [])
@@ -3808,6 +3897,60 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error adding instance")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "delete_assembly_instance":
+        try:
+            doc_id = arguments["documentId"]
+            ws_id = arguments["workspaceId"]
+            asm_eid = arguments["elementId"]
+            inst_id = arguments["instanceId"]
+            # Capture the instance's display name before deletion so the
+            # response is informative even though Onshape's DELETE returns {}.
+            before = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            before_instances = before.get("rootAssembly", {}).get("instances", [])
+            target = next(
+                (i for i in before_instances if i.get("id") == inst_id),
+                None,
+            )
+            if target is None:
+                payload = {
+                    "ok": False,
+                    "status": "ERROR",
+                    "instance_id": inst_id,
+                    "instance_name": "",
+                    "error_message": (
+                        f"No instance with id '{inst_id}' in this assembly. "
+                        f"Call get_assembly to list current instance ids."
+                    ),
+                    "tool": name,
+                }
+                return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+            removed_name = target.get("name", "")
+
+            await assembly_manager.delete_instance(doc_id, ws_id, asm_eid, inst_id)
+
+            after = await assembly_manager.get_assembly_definition(doc_id, ws_id, asm_eid)
+            after_ids = {
+                i.get("id") for i in after.get("rootAssembly", {}).get("instances", [])
+            }
+            still_present = inst_id in after_ids
+            payload = {
+                "ok": not still_present,
+                "status": "OK" if not still_present else "ERROR",
+                "instance_id": inst_id,
+                "instance_name": removed_name,
+                "error_message": (
+                    None if not still_present
+                    else f"Onshape returned 200 but instance {inst_id} is still in the assembly."
+                ),
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error deleting assembly instance")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "transform_instance":
@@ -3851,6 +3994,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments.get("name", "Fastened mate"), MateType.FASTENED,
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3870,6 +4015,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3889,6 +4036,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3899,6 +4048,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_cylindrical_mate":
         try:
+            # Cylindrical mates pair two cylindrical (or coaxial) faces; the
+            # right inference for a CYLINDER face is MID_AXIS_POINT, so
+            # default both sides to it. Callers can still pass an override
+            # (e.g. when one side is a planar face that defines the axis
+            # direction).
             mate_result = await _create_mate(
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
@@ -3908,6 +4062,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "MID_AXIS_POINT"),
+                second_inference_type=arguments.get("secondInferenceType", "MID_AXIS_POINT"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3922,6 +4078,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 name=arguments.get("name", "Mate connector"),
                 face_id=arguments["faceId"],
                 occurrence_path=[arguments["instanceId"]],
+                inference_type=arguments.get("inferenceType", "CENTROID"),
             )
             if arguments.get("flipPrimary"):
                 mc.set_flip_primary(True)

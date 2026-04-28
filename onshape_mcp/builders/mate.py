@@ -36,6 +36,7 @@ class MateConnectorBuilder:
         name: str = "Mate connector",
         face_id: Optional[str] = None,
         occurrence_path: Optional[List[str]] = None,
+        inference_type: str = "CENTROID",
     ):
         """Initialize mate connector builder.
 
@@ -43,10 +44,18 @@ class MateConnectorBuilder:
             name: Name of the mate connector feature
             face_id: Deterministic ID of the face to place the connector on
             occurrence_path: List of instance IDs defining the occurrence
+            inference_type: How to derive a coordinate system from the face.
+                "CENTROID" works for planar faces (the default — connector
+                placed at face centroid, Z along normal). For CYLINDER, CONE,
+                TORUS, or SPHERE faces, pass "MID_AXIS_POINT" — the
+                connector lands on the face's axis with Z along the axis
+                direction. CENTROID on a cylinder produces a featureStatus
+                ERROR with no actionable diagnostic from Onshape.
         """
         self.name = name
         self.face_id = face_id
         self.occurrence_path = occurrence_path
+        self.inference_type = inference_type
         self._flip_primary = False
         self._secondary_axis_type = "PLUS_X"
         self._transform_enabled = False
@@ -180,7 +189,7 @@ class MateConnectorBuilder:
                 "queries": [
                     {
                         "btType": "BTMInferenceQueryWithOccurrence-1083",
-                        "inferenceType": "CENTROID",
+                        "inferenceType": self.inference_type,
                         "path": self.occurrence_path or [],
                         "deterministicIds": [self.face_id] if self.face_id else [],
                     }
