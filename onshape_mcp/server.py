@@ -862,6 +862,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset (along face normal). Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' when firstFaceId is a CYLINDER, CONE, TORUS, or SPHERE face — CENTROID on a curved face produces a featureStatus ERROR.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -888,6 +898,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' when firstFaceId is a CYLINDER, CONE, TORUS, or SPHERE face (typical for revolute mates around a shaft) — CENTROID on a curved face errors.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -914,6 +934,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'CENTROID' works for planar faces. Pass 'MID_AXIS_POINT' for CYLINDER/CONE/TORUS/SPHERE faces.",
+                        "default": "CENTROID",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Same rules as firstInferenceType.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -940,6 +970,16 @@ async def list_tools() -> list[Tool]:
                     "secondOffsetX": {"type": ["number", "string"], "description": "Second connector X offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetY": {"type": ["number", "string"], "description": "Second connector Y offset. Bare = mm; unit-strings respected.", "default": 0},
                     "secondOffsetZ": {"type": ["number", "string"], "description": "Second connector Z offset. Bare = mm; unit-strings respected.", "default": 0},
+                    "firstInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from firstFaceId. Default 'MID_AXIS_POINT' (cylindrical mates pair coaxial cylinders). Override with 'CENTROID' if firstFaceId is a planar face that defines the axis direction.",
+                        "default": "MID_AXIS_POINT",
+                    },
+                    "secondInferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from secondFaceId. Default 'MID_AXIS_POINT'.",
+                        "default": "MID_AXIS_POINT",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "firstInstanceId", "secondInstanceId", "firstFaceId", "secondFaceId"],
             },
@@ -966,6 +1006,11 @@ async def list_tools() -> list[Tool]:
                     "offsetX": {"type": ["number", "string"], "description": "X offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "offsetY": {"type": ["number", "string"], "description": "Y offset from face center. Bare = mm; unit-strings respected.", "default": 0},
                     "offsetZ": {"type": ["number", "string"], "description": "Z offset (along face normal) from face center. Bare = mm; unit-strings respected.", "default": 0},
+                    "inferenceType": {
+                        "type": "string",
+                        "description": "How to derive a coordinate system from faceId. Default 'CENTROID' works for planar faces (connector at face centroid, Z along normal). For CYLINDER, CONE, TORUS, or SPHERE faces, pass 'MID_AXIS_POINT' — the connector lands on the face's axis with Z along the axis. CENTROID on a curved face produces a featureStatus ERROR with no actionable diagnostic from Onshape.",
+                        "default": "CENTROID",
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "instanceId", "faceId"],
             },
@@ -2755,6 +2800,8 @@ async def _create_mate(
     max_limit: float | None = None,
     first_offset: tuple[float, float, float] | None = None,
     second_offset: tuple[float, float, float] | None = None,
+    first_inference_type: str = "CENTROID",
+    second_inference_type: str = "CENTROID",
 ) -> FeatureApplyResult:
     """Create a mate between two instances using explicit mate connectors.
 
@@ -2783,6 +2830,7 @@ async def _create_mate(
         name=f"{mate_name} - MC1",
         face_id=first_face_id,
         occurrence_path=[first_instance_id],
+        inference_type=first_inference_type,
     )
     if first_offset:
         mc1.set_translation(*first_offset)
@@ -2797,6 +2845,7 @@ async def _create_mate(
         name=f"{mate_name} - MC2",
         face_id=second_face_id,
         occurrence_path=[second_instance_id],
+        inference_type=second_inference_type,
     )
     if second_offset:
         mc2.set_translation(*second_offset)
@@ -3945,6 +3994,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments.get("name", "Fastened mate"), MateType.FASTENED,
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3964,6 +4015,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3983,6 +4036,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "CENTROID"),
+                second_inference_type=arguments.get("secondInferenceType", "CENTROID"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -3993,6 +4048,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
 
     elif name == "create_cylindrical_mate":
         try:
+            # Cylindrical mates pair two cylindrical (or coaxial) faces; the
+            # right inference for a CYLINDER face is MID_AXIS_POINT, so
+            # default both sides to it. Callers can still pass an override
+            # (e.g. when one side is a planar face that defines the axis
+            # direction).
             mate_result = await _create_mate(
                 client,
                 arguments["documentId"], arguments["workspaceId"], arguments["elementId"],
@@ -4002,6 +4062,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 min_limit=arguments.get("minLimit"), max_limit=arguments.get("maxLimit"),
                 first_offset=_extract_offsets(arguments, "first"),
                 second_offset=_extract_offsets(arguments, "second"),
+                first_inference_type=arguments.get("firstInferenceType", "MID_AXIS_POINT"),
+                second_inference_type=arguments.get("secondInferenceType", "MID_AXIS_POINT"),
             )
             return [TextContent(type="text", text=_feature_apply_json(mate_result, tool_name=name))]
         except httpx.HTTPStatusError as e:
@@ -4016,6 +4078,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 name=arguments.get("name", "Mate connector"),
                 face_id=arguments["faceId"],
                 occurrence_path=[arguments["instanceId"]],
+                inference_type=arguments.get("inferenceType", "CENTROID"),
             )
             if arguments.get("flipPrimary"):
                 mc.set_flip_primary(True)
