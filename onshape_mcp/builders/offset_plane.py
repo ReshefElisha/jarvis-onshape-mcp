@@ -83,7 +83,6 @@ class OffsetPlaneBuilder:
                         "value": "OFFSET",
                         "parameterId": "cplaneType",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQueryList-148",
@@ -95,7 +94,6 @@ class OffsetPlaneBuilder:
                         ],
                         "parameterId": "entities",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -105,14 +103,12 @@ class OffsetPlaneBuilder:
                         "expression": offset_expression,
                         "parameterId": "offset",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterBoolean-144",
                         "value": self.flip,
                         "parameterId": "oppositeDirection",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                 ],
             },
