@@ -155,6 +155,22 @@ class ExtrudeBuilder:
                         "libraryRelationType": "NONE",
                     },
                     {
+                        # Onshape's public extrude feature requires an endBound
+                        # (BoundingType) enum. SYMMETRIC is NOT a BoundingType
+                        # value -- it is the separate `symmetric` boolean below.
+                        # So endBound stays BLIND and `symmetric` toggles the
+                        # centered case. Omitting endBound entirely makes the
+                        # feature spec incomplete and current Onshape (FS 3008)
+                        # rejects the whole feature with HTTP 400. See issue #8.
+                        "btType": "BTMParameterEnum-145",
+                        "namespace": "",
+                        "enumName": "BoundingType",
+                        "value": "BLIND",
+                        "parameterId": "endBound",
+                        "parameterName": "",
+                        "libraryRelationType": "NONE",
+                    },
+                    {
                         "btType": "BTMParameterQuantity-147",
                         "isInteger": False,
                         "value": depth_value_m,

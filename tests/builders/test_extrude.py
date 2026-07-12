@@ -210,9 +210,10 @@ class TestExtrudeBuilder:
     def test_end_type_defaults_to_blind(self):
         """symmetric boolean present and False by default for back-compat.
 
-        Onshape's public extrude feature rejects an `endBound` enum; it uses a
-        simple `symmetric: true/false` boolean. The builder translates our
-        ExtrudeEndType enum into that boolean so callers get a clean API.
+        Onshape's public extrude feature needs endBound=BLIND (a BoundingType)
+        AND a separate `symmetric: true/false` boolean (SYMMETRIC is not a
+        BoundingType value). The builder always emits endBound=BLIND and
+        translates our ExtrudeEndType enum into the symmetric boolean.
         """
         extrude = ExtrudeBuilder(sketch_feature_id="sketch1")
         result = extrude.build()
@@ -286,8 +287,11 @@ class TestExtrudeBuilder:
         assert result["feature"]["name"] == "CompleteExtrude"
 
         parameters = result["feature"]["parameters"]
-        # entities, operationType, endBound, depth, oppositeDirection
-        assert len(parameters) == 5
+        # entities, operationType, endBound, depth, oppositeDirection, symmetric
+        assert len(parameters) == 6
+        end_bound = next(p for p in parameters if p["parameterId"] == "endBound")
+        assert end_bound["enumName"] == "BoundingType"
+        assert end_bound["value"] == "BLIND"
 
     def test_zero_depth(self):
         """Test handling zero depth."""
