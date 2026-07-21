@@ -8,8 +8,8 @@ class BooleanType(Enum):
     """Boolean operation type."""
 
     UNION = "UNION"
-    SUBTRACT = "SUBTRACT"
-    INTERSECT = "INTERSECT"
+    SUBTRACT = "SUBTRACTION"
+    INTERSECT = "INTERSECTION"
 
 
 class BooleanBuilder:
@@ -76,9 +76,16 @@ class BooleanBuilder:
         if self.boolean_type in (BooleanType.SUBTRACT, BooleanType.INTERSECT):
             if not self.target_body_queries:
                 raise ValueError(
-                    f"At least one target body must be added for {self.boolean_type.value} "
+                    f"At least one target body must be added for {self.boolean_type.name} "
                     "operations"
                 )
+
+        selected_tools = list(self.tool_body_queries)
+        if self.boolean_type in (BooleanType.UNION, BooleanType.INTERSECT):
+            # Native booleanBodies uses one `tools` query for every body in
+            # union/intersection. The separate `targets` query is visible only
+            # for subtraction in the current feature specification.
+            selected_tools.extend(self.target_body_queries)
 
         parameters: List[Dict[str, Any]] = [
             {
@@ -86,25 +93,23 @@ class BooleanBuilder:
                 "namespace": "",
                 "enumName": "BooleanOperationType",
                 "value": self.boolean_type.value,
-                "parameterId": "booleanOperationType",
+                "parameterId": "operationType",
                 "parameterName": "",
-                "libraryRelationType": "NONE",
             },
             {
                 "btType": "BTMParameterQueryList-148",
                 "queries": [
                     {
                         "btType": "BTMIndividualQuery-138",
-                        "deterministicIds": self.tool_body_queries,
+                        "deterministicIds": selected_tools,
                     }
                 ],
                 "parameterId": "tools",
                 "parameterName": "",
-                "libraryRelationType": "NONE",
             },
         ]
 
-        if self.target_body_queries:
+        if self.boolean_type == BooleanType.SUBTRACT:
             parameters.append(
                 {
                     "btType": "BTMParameterQueryList-148",
@@ -116,7 +121,6 @@ class BooleanBuilder:
                     ],
                     "parameterId": "targets",
                     "parameterName": "",
-                    "libraryRelationType": "NONE",
                 }
             )
 
@@ -124,7 +128,7 @@ class BooleanBuilder:
             "btType": "BTFeatureDefinitionCall-1406",
             "feature": {
                 "btType": "BTMFeature-134",
-                "featureType": "boolean",
+                "featureType": "booleanBodies",
                 "name": self.name,
                 "suppressed": False,
                 "namespace": "",
