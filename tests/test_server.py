@@ -1939,7 +1939,7 @@ class TestFeatureTools:
     @patch("onshape_mcp.server.apply_feature_and_check")
     async def test_create_boolean_success(self, mock_apply):
         mock_apply.return_value = _mock_apply_result(
-            feature_id="bool123", feature_type="boolean"
+            feature_id="bool123", feature_type="booleanBodies"
         )
         result = await call_tool("create_boolean", {
             "documentId": "d", "workspaceId": "w", "elementId": "e",
@@ -1948,6 +1948,13 @@ class TestFeatureTools:
         import json as _json
         parsed = _json.loads(result[0].text)
         assert parsed["ok"] is True and parsed["feature_id"] == "bool123"
+        payload = mock_apply.await_args.args[4]
+        feature = payload["feature"]
+        params = {parameter["parameterId"]: parameter for parameter in feature["parameters"]}
+        assert feature["featureType"] == "booleanBodies"
+        assert params["operationType"]["value"] == "UNION"
+        assert params["tools"]["queries"][0]["deterministicIds"] == ["b1", "b2"]
+        assert "libraryRelationType" not in str(payload)
 
     @pytest.mark.asyncio
     @patch("onshape_mcp.server.apply_feature_and_check")
