@@ -136,9 +136,8 @@ class LinearPatternBuilder:
                     "queryString": "",
                 }
             ],
-            "parameterId": "directionQuery",
+            "parameterId": "directionOne",
             "parameterName": "",
-            "libraryRelationType": "NONE",
         }
 
     def build(self) -> Dict[str, Any]:
@@ -171,16 +170,10 @@ class LinearPatternBuilder:
                 "namespace": "",
                 "parameters": [
                     {
-                        "btType": "BTMParameterQueryList-148",
-                        "queries": [
-                            {
-                                "btType": "BTMIndividualQuery-138",
-                                "deterministicIds": self.feature_queries,
-                            }
-                        ],
-                        "parameterId": "entities",
+                        "btType": "BTMParameterFeatureList-1749",
+                        "featureIds": self.feature_queries,
+                        "parameterId": "instanceFunction",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     self._build_direction_query(),
                     {
@@ -190,7 +183,6 @@ class LinearPatternBuilder:
                         "value": PatternType.FEATURE.value,
                         "parameterId": "patternType",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -200,7 +192,6 @@ class LinearPatternBuilder:
                         "expression": distance_expression,
                         "parameterId": "distance",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -210,7 +201,6 @@ class LinearPatternBuilder:
                         "expression": str(self.count),
                         "parameterId": "instanceCount",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                 ],
             },
@@ -313,7 +303,6 @@ class CircularPatternBuilder:
             ],
             "parameterId": "axisQuery",
             "parameterName": "",
-            "libraryRelationType": "NONE",
         }
 
     def build(self) -> Dict[str, Any]:
@@ -351,7 +340,6 @@ class CircularPatternBuilder:
                         ],
                         "parameterId": "entities",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     self._build_axis_query(),
                     {
@@ -361,7 +349,6 @@ class CircularPatternBuilder:
                         "value": PatternType.FEATURE.value,
                         "parameterId": "patternType",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -371,7 +358,6 @@ class CircularPatternBuilder:
                         "expression": angle_expression,
                         "parameterId": "angle",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                     {
                         "btType": "BTMParameterQuantity-147",
@@ -381,7 +367,6 @@ class CircularPatternBuilder:
                         "expression": str(self.count),
                         "parameterId": "instanceCount",
                         "parameterName": "",
-                        "libraryRelationType": "NONE",
                     },
                 ],
             },
