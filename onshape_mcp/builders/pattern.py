@@ -136,7 +136,7 @@ class LinearPatternBuilder:
                     "queryString": "",
                 }
             ],
-            "parameterId": "directionQuery",
+            "parameterId": "directionOne",
             "parameterName": "",
         }
 
@@ -170,14 +170,9 @@ class LinearPatternBuilder:
                 "namespace": "",
                 "parameters": [
                     {
-                        "btType": "BTMParameterQueryList-148",
-                        "queries": [
-                            {
-                                "btType": "BTMIndividualQuery-138",
-                                "deterministicIds": self.feature_queries,
-                            }
-                        ],
-                        "parameterId": "entities",
+                        "btType": "BTMParameterFeatureList-1749",
+                        "featureIds": self.feature_queries,
+                        "parameterId": "instanceFunction",
                         "parameterName": "",
                     },
                     self._build_direction_query(),
