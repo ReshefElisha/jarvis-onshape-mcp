@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from unittest.mock import AsyncMock
+
 from onshape_mcp.api.sketch_edit import (
     _merge,
     _strip_subpoint,
+    edit_sketch,
     wire_constraint_refs,
     wire_entity_id,
 )
@@ -256,3 +259,95 @@ def test_merge_combined_diff_in_one_call():
     remaining_constraint_ids = {wire_entity_id(c) for c in mc}
     assert remaining_constraint_ids == {"coin_v2"}
     assert any(c.referenced == "line1" for c in cascaded)
+
+
+# ---- edit_sketch safety gate ----------------------------------------------
+# Same risky/safe shapes used in tests/api/test_sketch_inspect.py and
+# tests/api/test_feature_apply.py -- lifted from a real captured /features
+# response (knowledge_base/api/real_sketch_example.json).
+
+def _risky_sketch_feature(feature_id: str = "riskyS") -> dict:
+    return {
+        "btType": "BTMSketch-151",
+        "featureId": feature_id,
+        "name": "Sketch 1",
+        "parameters": [
+            {
+                "btType": "BTMParameterQueryList-148",
+                "parameterId": "sketchPlane",
+                "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": ["KeKO"]}],
+            }
+        ],
+        "entities": [],
+        "constraints": [],
+    }
+
+
+def _safe_sketch_feature(feature_id: str = "safeS") -> dict:
+    return {
+        "btType": "BTMSketch-151",
+        "featureId": feature_id,
+        "name": "Sketch 2",
+        "parameters": [
+            {
+                "btType": "BTMParameterQueryList-148",
+                "parameterId": "sketchPlane",
+                "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": ["JCC"]}],
+            }
+        ],
+        "entities": [LINE1, LINE2],
+        "constraints": [],
+    }
+
+
+class TestEditSketchSafetyGate:
+    @pytest.mark.asyncio
+    async def test_blocks_risky_sketch_without_override(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock()
+
+        result = await edit_sketch(
+            onshape_client, "d", "w", "e", "s1",
+            remove_ids=["line1"],
+        )
+
+        assert result.apply.ok is False
+        assert result.apply.status == "BLOCKED"
+        assert result.added_entity_ids == []
+        assert result.removed_entity_ids == []
+        onshape_client.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_proceeds_with_override_safety_check(self, onshape_client):
+        onshape_client.get = AsyncMock(
+            return_value={"features": [dict(_risky_sketch_feature("s1"), entities=[LINE1, LINE2])]}
+        )
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s1", "name": "Sketch 1", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await edit_sketch(
+            onshape_client, "d", "w", "e", "s1",
+            remove_ids=["line1"],
+            override_safety_check=True,
+        )
+
+        assert result.apply.ok is True
+        onshape_client.post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ignores_safe_sketch(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_safe_sketch_feature("s2")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s2", "name": "Sketch 2", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await edit_sketch(
+            onshape_client, "d", "w", "e", "s2",
+            remove_ids=["line1"],
+        )
+
+        assert result.apply.ok is True
+        onshape_client.post.assert_awaited_once()

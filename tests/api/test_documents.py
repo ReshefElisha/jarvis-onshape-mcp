@@ -518,3 +518,86 @@ class TestDocumentManager:
         with pytest.raises(Exception) as exc_info:
             await document_manager.delete_document("doc_abc")
         assert "Forbidden" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_rename_document_success(self, document_manager, onshape_client):
+        """rename_document should POST /api/v10/documents/{did} with {"name": ...}."""
+        rename_response = {
+            "id": "doc_abc",
+            "name": "Renamed Document",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "modifiedAt": "2024-01-02T00:00:00Z",
+            "owner": {"id": "user1", "name": "Test User"},
+            "public": False,
+            "description": None,
+        }
+        onshape_client.post = AsyncMock(return_value=rename_response)
+
+        doc = await document_manager.rename_document("doc_abc", "Renamed Document")
+
+        assert isinstance(doc, DocumentInfo)
+        assert doc.id == "doc_abc"
+        assert doc.name == "Renamed Document"
+
+        onshape_client.post.assert_awaited_once()
+        path, kwargs = onshape_client.post.await_args[0], onshape_client.post.await_args[1]
+        assert path[0] == "/api/v10/documents/doc_abc"
+        assert kwargs["data"] == {"name": "Renamed Document"}
+
+    @pytest.mark.asyncio
+    async def test_rename_document_propagates_errors(self, document_manager, onshape_client):
+        onshape_client.post = AsyncMock(side_effect=Exception("404 Not Found"))
+        with pytest.raises(Exception) as exc_info:
+            await document_manager.rename_document("doc_missing", "New Name")
+        assert "Not Found" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_rename_element_success(self, document_manager, onshape_client):
+        """rename_element should discover the 'Name' propertyId from a GET,
+        then POST only that property back to the same metadata path."""
+        metadata_response = {
+            "properties": [
+                {"propertyId": "prop_id_1", "name": "State", "value": "IN_PROGRESS"},
+                {"propertyId": "prop_id_2", "name": "Name", "value": "Part Studio 1"},
+            ]
+        }
+        update_response = {
+            "properties": [
+                {"propertyId": "prop_id_1", "name": "State", "value": "IN_PROGRESS"},
+                {"propertyId": "prop_id_2", "name": "Name", "value": "Bracket"},
+            ]
+        }
+        onshape_client.get = AsyncMock(return_value=metadata_response)
+        onshape_client.post = AsyncMock(return_value=update_response)
+
+        new_name = await document_manager.rename_element("doc1", "ws1", "el1", "Bracket")
+
+        assert new_name == "Bracket"
+
+        expected_path = "/api/metadata/d/doc1/w/ws1/e/el1"
+        onshape_client.get.assert_awaited_once_with(expected_path)
+        onshape_client.post.assert_awaited_once_with(
+            expected_path,
+            data={"properties": [{"propertyId": "prop_id_2", "value": "Bracket"}]},
+        )
+
+    @pytest.mark.asyncio
+    async def test_rename_element_missing_name_property_raises(
+        self, document_manager, onshape_client
+    ):
+        """If metadata has no 'Name' property, raise instead of silently no-op'ing."""
+        onshape_client.get = AsyncMock(
+            return_value={"properties": [{"propertyId": "prop_id_1", "name": "State"}]}
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            await document_manager.rename_element("doc1", "ws1", "el1", "Bracket")
+
+        assert "Name" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_rename_element_propagates_errors(self, document_manager, onshape_client):
+        onshape_client.get = AsyncMock(side_effect=Exception("500 Server Error"))
+        with pytest.raises(Exception) as exc_info:
+            await document_manager.rename_element("doc1", "ws1", "el1", "Bracket")
+        assert "Server Error" in str(exc_info.value)

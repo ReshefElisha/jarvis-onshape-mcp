@@ -5,7 +5,7 @@ import sys
 import asyncio
 import base64
 import json
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 import httpx
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -23,7 +23,11 @@ from .api.partstudio import PartStudioManager
 from .api.variables import VariableManager
 from .api.documents import DocumentManager
 from .builders.sketch import SketchBuilder, SketchPlane
-from .api.sketch_inspect import inspect_sketch as _inspect_sketch_feature, list_sketches as _list_sketches
+from .api.sketch_inspect import (
+    inspect_sketch as _inspect_sketch_feature,
+    list_sketches as _list_sketches,
+    assess_sketch_risk,
+)
 from .api.sketch_render import render_sketch_png as _render_sketch_png
 from .builders.extrude import ExtrudeBuilder, ExtrudeEndType, ExtrudeType
 from .builders.thicken import ThickenBuilder, ThickenType
@@ -34,6 +38,8 @@ from .api.feature_apply import (
     apply_feature_and_check,
     apply_assembly_feature_and_check,
     update_feature_params_and_check,
+    rename_feature_and_check,
+    batch_rename_features_and_check,
     FeatureApplyResult,
 )
 from .api.entities import EntityManager
@@ -112,6 +118,7 @@ list_entities, or from create_offset_plane).
 - create_linear_pattern / create_circular_pattern
 - write_featurescript_feature — escape hatch: threads, helices, sweeps, lofts, anything not primitive. Takes a complete FS source file.
 - update_feature — patch params on an existing feature (iteration)
+- rename_feature / batch_rename_features — rename one or many features. Sketches with external geometry references (non-default plane, or constraints bound outside the sketch) are BLOCKED by default — see overrideSafetyCheck.
 
 ### Introspection (USE OFTEN)
 - describe_part_studio — topology + multi-view renders in one call. First stop after every mutation.
@@ -562,8 +569,102 @@ async def list_tools() -> list[Tool]:
                         },
                         "minItems": 1,
                     },
+                    "overrideSafetyCheck": {
+                        "type": "boolean",
+                        "description": (
+                            "Skip the risky-sketch safety check and force this call "
+                            "through even if the target is a sketch with external "
+                            "geometry references (non-default plane, or a constraint "
+                            "binding to geometry outside the sketch's own entities). "
+                            "Only set true after reviewing the risk via inspect_sketch "
+                            "— re-POSTing such a sketch has been confirmed, live, to "
+                            "corrupt the model. Default false."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "featureId", "updates"],
+            },
+        ),
+        Tool(
+            name="rename_feature",
+            description=(
+                "Rename a feature in the feature tree (e.g. 'Extrude 1' -> "
+                "'Boss extrude'). Purely a label change — geometry is "
+                "untouched. Returns the standard {ok, status, feature_id, "
+                "feature_name, ...} contract. A rename of a sketch with "
+                "external geometry references is blocked by default (see "
+                "overrideSafetyCheck) — confirmed live to corrupt the model."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "ID of the feature to rename"},
+                    "newName": {"type": "string", "description": "New display name for the feature"},
+                    "overrideSafetyCheck": {
+                        "type": "boolean",
+                        "description": (
+                            "Skip the risky-sketch safety check and force this call "
+                            "through even if the target is a sketch with external "
+                            "geometry references (non-default plane, or a constraint "
+                            "binding to geometry outside the sketch's own entities). "
+                            "Only set true after reviewing the risk via inspect_sketch "
+                            "— re-POSTing such a sketch has been confirmed, live, to "
+                            "corrupt the model. Default false."
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId", "newName"],
+            },
+        ),
+        Tool(
+            name="batch_rename_features",
+            description=(
+                "Rename multiple Part Studio features in one call, executed "
+                "sequentially against a single element (not in parallel) — "
+                "this cannot trigger the concurrent-write race that firing N "
+                "separate rename_feature calls in parallel can. Each item is "
+                "attempted independently: a risky sketch (status=BLOCKED) or "
+                "an Onshape-side error on one item does not abort the rest of "
+                "the batch. Returns a per-item result array — check each "
+                "entry's ok/status, not just that the tool call itself "
+                "succeeded."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "renames": {
+                        "type": "array",
+                        "description": "Ordered list of {featureId, newName} pairs",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "featureId": {"type": "string", "description": "ID of the feature to rename"},
+                                "newName": {"type": "string", "description": "New display name"},
+                            },
+                            "required": ["featureId", "newName"],
+                        },
+                        "minItems": 1,
+                    },
+                    "overrideSafetyCheck": {
+                        "type": "boolean",
+                        "description": (
+                            "Applies to every item in the batch. If true, skips the "
+                            "risky-sketch safety check for all items. Default false: "
+                            "risky items report status=BLOCKED instead of being sent "
+                            "to Onshape."
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": ["documentId", "workspaceId", "elementId", "renames"],
             },
         ),
         Tool(
@@ -731,6 +832,35 @@ async def list_tools() -> list[Tool]:
                     "documentId": {"type": "string", "description": "Document ID to delete"},
                 },
                 "required": ["documentId"],
+            },
+        ),
+        Tool(
+            name="rename_document",
+            description="Rename an existing Onshape document. Returns {ok, document_id, document_name}.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID to rename"},
+                    "newName": {"type": "string", "description": "New name for the document"},
+                },
+                "required": ["documentId", "newName"],
+            },
+        ),
+        Tool(
+            name="rename_element",
+            description=(
+                "Rename an element (a document tab — Part Studio, Assembly, "
+                "drawing, etc.). Returns {ok, element_id, element_name}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Element ID to rename"},
+                    "newName": {"type": "string", "description": "New display name for the element"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "newName"],
             },
         ),
         Tool(
@@ -1255,7 +1385,10 @@ async def list_tools() -> list[Tool]:
                 "constraint ids. Cascade: any constraint whose `entities`/"
                 "`entity` (or sub-point ref like `line1.start`) names an "
                 "entity in removeIds is auto-dropped and reported back in "
-                "`cascaded_removals` so you see exactly what got pulled."
+                "`cascaded_removals` so you see exactly what got pulled.\n\n"
+                "An edit to a sketch with external geometry references is "
+                "blocked by default (see overrideSafetyCheck) — confirmed "
+                "live to corrupt the model."
             ),
             inputSchema={
                 "type": "object",
@@ -1297,6 +1430,19 @@ async def list_tools() -> list[Tool]:
                             "Constraints referencing a removed entity cascade "
                             "out and are reported in cascaded_removals."
                         ),
+                    },
+                    "overrideSafetyCheck": {
+                        "type": "boolean",
+                        "description": (
+                            "Skip the risky-sketch safety check and force this call "
+                            "through even if the target has external geometry "
+                            "references (non-default plane, or a constraint binding "
+                            "to geometry outside the sketch's own entities). Only "
+                            "set true after reviewing the risk via inspect_sketch — "
+                            "re-POSTing such a sketch has been confirmed, live, to "
+                            "corrupt the model. Default false."
+                        ),
+                        "default": False,
                     },
                 },
                 "required": ["documentId", "workspaceId", "elementId", "sketchFeatureId"],
@@ -2410,13 +2556,23 @@ def _hints_for_result(result: FeatureApplyResult) -> list[str]:
       - OK / INFO   -> next-step reflex: describe + mention write_featurescript_feature.
       - WARNING     -> read error_message, check VS for missing vars.
       - ERROR       -> update_feature or delete_feature_by_name + retry.
+      - BLOCKED     -> safety check refused before sending anything; inspect + decide.
       - EXCEPTION   -> handled in `_exception_json`, not here.
       - UNKNOWN     -> conservative: suggest describe_part_studio to learn state.
     """
     status = result.status
     enum_hints = _enum_specific_hints(result.error_message)
 
-    if status in ("OK", "INFO"):
+    if status == "BLOCKED":
+        generic = [
+            "This call was blocked before anything was sent to Onshape — the "
+            "target sketch has external geometry references and this "
+            "rename/update/edit mechanism is confirmed to corrupt such "
+            "sketches. Call inspect_sketch on this featureId to see exactly "
+            "which plane or constraints are external. If you've reviewed it "
+            "and still want to proceed, retry with overrideSafetyCheck=true.",
+        ]
+    elif status in ("OK", "INFO"):
         generic = [
             "To see what changed, call describe_part_studio — the PHYSICAL "
             "SUMMARY + changes block show new topology at a glance.",
@@ -2504,11 +2660,6 @@ def _feature_apply_json(
     return json.dumps(payload, indent=2)
 
 
-# Standard datum plane deterministic ids. Anything else in a sketch's
-# `sketchPlane` parameter signals the sketch was placed on a picked face.
-_STANDARD_PLANE_IDS = frozenset({"JCC", "JDC", "JEC"})
-
-
 async def _sketch_is_on_face(
     document_id: str,
     workspace_id: str,
@@ -2518,34 +2669,18 @@ async def _sketch_is_on_face(
     """Return True if the named sketch was placed on a picked face (vs a
     standard Front/Top/Right plane).
 
-    Walks the sketch feature's `sketchPlane` parameter and checks whether the
-    referenced deterministic id matches a default plane (JCC/JDC/JEC) or
-    something else. Returns False on any lookup or shape error so callers
-    fall back to legacy behavior rather than crash.
+    Delegates to `assess_sketch_risk` (the same detector `rename_feature`/
+    `update_feature`/`edit_sketch` gate on) rather than re-walking the
+    `sketchPlane` parameter itself, so there's one source of truth for what
+    counts as a "default plane". Returns False on any lookup or shape error
+    so callers fall back to legacy behavior rather than crash.
     """
     try:
         feats = await partstudio_manager.get_features(
             document_id, workspace_id, element_id
         )
-        sketch = next(
-            (
-                f for f in feats.get("features", []) or []
-                if f.get("featureId") == sketch_feature_id
-            ),
-            None,
-        )
-        if not sketch:
-            return False
-        for p in sketch.get("parameters", []) or []:
-            if p.get("parameterId") != "sketchPlane":
-                continue
-            queries = p.get("queries") or []
-            for q in queries:
-                ids = q.get("deterministicIds") or []
-                for ent_id in ids:
-                    if ent_id and ent_id not in _STANDARD_PLANE_IDS:
-                        return True
-        return False
+        risk = assess_sketch_risk(feats, sketch_feature_id)
+        return bool(risk and not risk["plane_is_default"])
     except Exception:  # noqa: BLE001
         return False
 
@@ -3220,12 +3355,58 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 arguments["elementId"],
                 arguments["featureId"],
                 arguments["updates"],
+                override_safety_check=bool(arguments.get("overrideSafetyCheck", False)),
             )
             return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
         except httpx.HTTPStatusError as e:
             return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
         except Exception as e:
             logger.exception("Unexpected error updating feature")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "rename_feature":
+        try:
+            result = await rename_feature_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["featureId"],
+                arguments["newName"],
+                override_safety_check=bool(arguments.get("overrideSafetyCheck", False)),
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming feature")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
+    elif name == "batch_rename_features":
+        try:
+            results = await batch_rename_features_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["renames"],
+                override_safety_check=bool(arguments.get("overrideSafetyCheck", False)),
+            )
+            payload = {
+                "tool": name,
+                "results": results,
+                "summary": {
+                    "total": len(results),
+                    "ok": sum(1 for r in results if r["ok"]),
+                    "blocked": sum(1 for r in results if r["status"] == "BLOCKED"),
+                    "error": sum(1 for r in results if r["status"] == "ERROR"),
+                },
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error in batch_rename_features")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
     elif name == "list_documents":
@@ -3676,6 +3857,73 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 "ok": False,
                 "status": "EXCEPTION",
                 "document_id": arguments["documentId"],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
+
+    elif name == "rename_document":
+        try:
+            doc = await document_manager.rename_document(
+                arguments["documentId"], arguments["newName"]
+            )
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "document_id": doc.id,
+                "document_name": doc.name,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": f"HTTP {e.response.status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming document")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
+
+    elif name == "rename_element":
+        try:
+            new_name = await document_manager.rename_element(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["newName"],
+            )
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "element_id": arguments["elementId"],
+                "element_name": new_name,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": arguments["elementId"],
+                "error_message": f"HTTP {e.response.status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming element")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": arguments["elementId"],
                 "error_message": str(e),
                 "tool": name,
             }, indent=2))]
@@ -4144,6 +4392,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 add_entities=arguments.get("addEntities") or [],
                 add_constraints=arguments.get("addConstraints") or [],
                 remove_ids=arguments.get("removeIds") or [],
+                override_safety_check=bool(arguments.get("overrideSafetyCheck", False)),
             )
             apply = result.apply
             payload = {

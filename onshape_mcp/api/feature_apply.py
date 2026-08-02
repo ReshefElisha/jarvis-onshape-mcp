@@ -9,20 +9,46 @@ Routing every feature mutation through `apply_feature_and_check` gives callers
 Evidence for the response shape used here is captured in
 `scratchpad/smoke-test.md` and `scratchpad/probe-patch-and-shadedviews.md`
 in the parent project (`/Users/shef/projects/onshape-mcp/`).
+
+Also serializes the mutating POST per (document, workspace, element) — see
+`_get_element_lock`. Onshape's feature-tree endpoint applies each write
+against a base microversion and regenerates downstream features from there;
+firing concurrent mutating calls at the same Part Studio (e.g. a batch of
+parallel renames) lets them race on that base and corrupts the tree even
+though each individual call is a no-op on geometry. Confirmed live: 20
+parallel `rename_feature` calls against one Part Studio put 21 of 23
+features into ERROR/WARNING and visibly collapsed the model (recovered via
+Onshape's version history). Reads aren't locked, only the write.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, Dict, List, Literal, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from .client import OnshapeClient
+from .sketch_inspect import assess_sketch_risk
 
 
-FeatureStatus = Literal["OK", "INFO", "WARNING", "ERROR", "UNKNOWN"]
+FeatureStatus = Literal["OK", "INFO", "WARNING", "ERROR", "BLOCKED", "UNKNOWN"]
+
+# One lock per (document_id, workspace_id, element_id), created lazily.
+# defaultdict's __getitem__ is a single synchronous dict op with no `await`
+# inside, so it's safe to call from multiple concurrent asyncio tasks without
+# its own lock — no two tasks can interleave mid-lookup on one event loop.
+_element_locks: "defaultdict[Tuple[str, str, str], asyncio.Lock]" = defaultdict(
+    asyncio.Lock
+)
+
+
+def _get_element_lock(document_id: str, workspace_id: str, element_id: str) -> asyncio.Lock:
+    """Return the lock guarding mutating writes to this Part Studio/Assembly."""
+    return _element_locks[(document_id, workspace_id, element_id)]
 
 
 class FeatureApplyResult(BaseModel):
@@ -111,7 +137,8 @@ async def apply_feature_and_check(
             logger.warning(f"track_changes: before-snapshot failed ({e}); skipping diff")
             bodies_before = None
 
-    response = await client.post(path, data=feature_payload)
+    async with _get_element_lock(document_id, workspace_id, element_id):
+        response = await client.post(path, data=feature_payload)
 
     # Primary source: top-level featureState in the POST response.
     state = response.get("featureState") if isinstance(response, dict) else None
@@ -220,7 +247,8 @@ async def apply_assembly_feature_and_check(
     )
     path = base if operation == "create" else f"{base}/featureid/{feature_id}"
 
-    response = await client.post(path, data=feature_payload)
+    async with _get_element_lock(document_id, workspace_id, element_id):
+        response = await client.post(path, data=feature_payload)
 
     state = response.get("featureState") if isinstance(response, dict) else None
     feature = response.get("feature", {}) if isinstance(response, dict) else {}
@@ -280,6 +308,8 @@ async def update_feature_params_and_check(
     element_id: str,
     feature_id: str,
     updates: List[Dict[str, Any]],
+    *,
+    override_safety_check: bool = False,
 ) -> FeatureApplyResult:
     """Patch a specific feature's parameters and report the real Onshape status.
 
@@ -301,10 +331,17 @@ async def update_feature_params_and_check(
             `expression` (e.g. `"15 mm"`, `"90 deg"`) and the helper clears the
             stale numeric `value` so Onshape re-evaluates. For booleans / enums
             (BTMParameterBoolean-144 / BTMParameterEnum-145) just set `value`.
+        override_safety_check: If the target is a sketch with external
+            geometry references (non-default plane, or a constraint bound
+            to geometry outside the sketch's own entities), this call is
+            blocked by default (see `assess_sketch_risk`) — that pattern is
+            confirmed to corrupt the model when re-POSTed via this
+            mechanism. Pass True to force it through anyway.
 
     Returns:
-        FeatureApplyResult with the post-update featureStatus. ok=False if the
-        feature errors after the patch (so Claude learns the tweak was wrong).
+        FeatureApplyResult with the post-update featureStatus. ok=False if
+        the feature errors after the patch (so Claude learns the tweak was
+        wrong), or status="BLOCKED" if the safety check refused to send it.
 
     Raises:
         ValueError: feature_id not found, or an `updates` entry has no
@@ -332,6 +369,27 @@ async def update_feature_params_and_check(
             f"feature_id {feature_id!r} not found in element. "
             f"Available ids: {[f.get('featureId') for f in features]}"
         )
+
+    if not override_safety_check:
+        risk = assess_sketch_risk(features_doc, feature_id)
+        if risk and risk["risky"]:
+            return FeatureApplyResult(
+                ok=False,
+                status="BLOCKED",
+                feature_id=feature_id,
+                feature_name=target.get("name") or "",
+                feature_type=target.get("featureType") or target.get("btType") or "",
+                error_message=(
+                    f"BLOCKED by safety check (nothing was sent to Onshape): "
+                    f"{risk['summary']} Onshape's REST feature-patch mechanism "
+                    f"(GET the full feature, patch one field, POST it back "
+                    f"unchanged otherwise) is confirmed to corrupt sketches "
+                    f"like this one. Call inspect_sketch on featureId "
+                    f"{feature_id!r} to review the exact plane/constraint "
+                    f"references, then retry with override_safety_check=True "
+                    f"if you still want to proceed."
+                ),
+            )
 
     params = target.get("parameters") or []
     param_by_id: Dict[str, Dict[str, Any]] = {
@@ -380,6 +438,239 @@ async def update_feature_params_and_check(
         operation="update",
         feature_id=feature_id,
     )
+
+
+async def rename_feature_and_check(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    new_name: str,
+    *,
+    override_safety_check: bool = False,
+) -> FeatureApplyResult:
+    """Rename a Part Studio feature (the label in the feature tree, e.g.
+    'Extrude 1' -> 'Boss extrude').
+
+    Same re-POST-the-whole-feature mechanism as
+    `update_feature_params_and_check`, except it patches the feature's
+    top-level `name` field instead of an entry in `parameters`.
+
+    Args:
+        client: Active OnshapeClient.
+        document_id, workspace_id, element_id: Usual triple.
+        feature_id: Feature to rename.
+        new_name: New display name.
+        override_safety_check: If the target is a sketch with external
+            geometry references, this call is blocked by default (see
+            `assess_sketch_risk`) — confirmed to corrupt the model when
+            re-POSTed via this mechanism. Pass True to force it through.
+
+    Returns:
+        FeatureApplyResult with the post-rename featureStatus (renaming
+        doesn't change geometry, so this should always be OK/INFO unless the
+        feature was already broken), or status="BLOCKED" if the safety
+        check refused to send it.
+
+    Raises:
+        ValueError: feature_id not found in the element.
+    """
+    if not feature_id:
+        raise ValueError("feature_id is required")
+
+    base = (
+        f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    features_doc = await client.get(base)
+
+    return await _rename_from_features_doc(
+        client,
+        document_id,
+        workspace_id,
+        element_id,
+        feature_id,
+        new_name,
+        features_doc=features_doc,
+        override_safety_check=override_safety_check,
+    )
+
+
+async def _rename_from_features_doc(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    new_name: str,
+    *,
+    features_doc: Dict[str, Any],
+    override_safety_check: bool = False,
+) -> FeatureApplyResult:
+    """Rename one feature using an ALREADY-FETCHED /features response.
+
+    Split out of `rename_feature_and_check` so a batch can pay for the
+    (large) GET once instead of once per item — see
+    `batch_rename_features_and_check` for why that matters.
+
+    The caller owns the fetch; this function never issues a GET. It does
+    not mutate `features_doc`: the target feature is shallow-copied before
+    its `name` is patched, so a shared doc stays clean for later items.
+    """
+    features: List[Dict[str, Any]] = features_doc.get("features", []) or []
+
+    target: Optional[Dict[str, Any]] = None
+    for feat in features:
+        if feat.get("featureId") == feature_id:
+            target = feat
+            break
+    if target is None:
+        raise ValueError(
+            f"feature_id {feature_id!r} not found in element. "
+            f"Available ids: {[f.get('featureId') for f in features]}"
+        )
+
+    if not override_safety_check:
+        risk = assess_sketch_risk(features_doc, feature_id)
+        if risk and risk["risky"]:
+            return FeatureApplyResult(
+                ok=False,
+                status="BLOCKED",
+                feature_id=feature_id,
+                feature_name=target.get("name") or "",
+                feature_type=target.get("featureType") or target.get("btType") or "",
+                error_message=(
+                    f"BLOCKED by safety check (nothing was sent to Onshape): "
+                    f"{risk['summary']} Onshape's REST feature-patch mechanism "
+                    f"(GET the full feature, patch one field, POST it back "
+                    f"unchanged otherwise) is confirmed to corrupt sketches "
+                    f"like this one. Call inspect_sketch on featureId "
+                    f"{feature_id!r} to review the exact plane/constraint "
+                    f"references, then retry with override_safety_check=True "
+                    f"if you still want to proceed."
+                ),
+            )
+
+    # Shallow copy so a shared features_doc isn't left mutated for the next
+    # item in a batch. Only the top-level `name` changes, so a shallow copy
+    # is sufficient -- nested parameters/entities are re-sent unchanged by
+    # reference, which is exactly the semantics we want.
+    patched = dict(target)
+    patched["name"] = new_name
+
+    return await apply_feature_and_check(
+        client,
+        document_id,
+        workspace_id,
+        element_id,
+        {"feature": patched},
+        operation="update",
+        feature_id=feature_id,
+    )
+
+
+async def batch_rename_features_and_check(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    renames: List[Dict[str, str]],
+    *,
+    override_safety_check: bool = False,
+) -> List[Dict[str, Any]]:
+    """Rename multiple Part Studio features in one call.
+
+    Executes sequentially (`for` + `await`, not `asyncio.gather`) — one
+    caller-visible tool call driving one sequential loop structurally cannot
+    reproduce the parallel-write race that firing N separate rename_feature
+    calls at once can (see the per-element lock in `apply_feature_and_check`
+    for the general-purpose fix; this is belt-and-suspenders by construction
+    for the specific "batch rename" use case).
+
+    Each item is attempted independently and gets the same safety-check
+    gate: a risky sketch (status=BLOCKED) or an Onshape-side error on one
+    item does not abort the rest of the batch.
+
+    Fetches `/features` ONCE for the whole batch rather than once per item.
+    This matters a lot in practice: the feature list on a real Part Studio
+    runs ~500 KB while a single rename's POST body is ~15 KB, so a
+    per-item fetch makes an N-item batch cost roughly N x 500 KB. A live
+    15-item batch did exactly that (~8 MB through one endpoint in ~2
+    minutes) and exhausted an Onshape-side quota on
+    `/partstudios/.../features` — 8 items landed, the remaining 7 got HTTP
+    429 and the endpoint stayed throttled for hours. Sharing the fetch cuts
+    that to one ~500 KB read plus N small writes.
+
+    Tradeoff of the shared fetch, stated plainly: every item is patched
+    from a snapshot taken before the batch started, rather than from state
+    refreshed after the previous item's write. For renames specifically
+    that is sound — a rename changes only the target feature's top-level
+    `name`, so it cannot invalidate any OTHER feature's body in the
+    snapshot, and each item targets a different featureId. Do not
+    generalize this to batched operations that change geometry, where a
+    stale snapshot genuinely could go wrong.
+
+    Args:
+        client: Active OnshapeClient.
+        document_id, workspace_id, element_id: Usual triple.
+        renames: Ordered list of {"featureId": ..., "newName": ...} dicts.
+        override_safety_check: Applies to every item in the batch.
+
+    Returns:
+        List of per-item result dicts: {featureId, requestedName, ok,
+        status, feature_name, error_message}, one per input item, in order.
+    """
+    base = (
+        f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    features_doc = await client.get(base)
+
+    results: List[Dict[str, Any]] = []
+    for item in renames:
+        feature_id = item.get("featureId") if isinstance(item, dict) else None
+        new_name = item.get("newName") if isinstance(item, dict) else None
+        if not feature_id or not new_name:
+            results.append({
+                "featureId": feature_id,
+                "requestedName": new_name,
+                "ok": False,
+                "status": "ERROR",
+                "feature_name": "",
+                "error_message": (
+                    f"each renames[] item must have non-empty featureId and "
+                    f"newName, got {item!r}"
+                ),
+            })
+            continue
+        try:
+            result = await _rename_from_features_doc(
+                client,
+                document_id,
+                workspace_id,
+                element_id,
+                feature_id,
+                new_name,
+                features_doc=features_doc,
+                override_safety_check=override_safety_check,
+            )
+            results.append({
+                "featureId": feature_id,
+                "requestedName": new_name,
+                "ok": result.ok,
+                "status": result.status,
+                "feature_name": result.feature_name,
+                "error_message": result.error_message,
+            })
+        except Exception as e:  # noqa: BLE001
+            results.append({
+                "featureId": feature_id,
+                "requestedName": new_name,
+                "ok": False,
+                "status": "ERROR",
+                "feature_name": "",
+                "error_message": str(e),
+            })
+    return results
 
 
 def _extract_error_message(
