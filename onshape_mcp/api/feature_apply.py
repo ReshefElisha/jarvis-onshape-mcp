@@ -382,6 +382,68 @@ async def update_feature_params_and_check(
     )
 
 
+async def rename_feature_and_check(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    new_name: str,
+) -> FeatureApplyResult:
+    """Rename a Part Studio feature (the label in the feature tree, e.g.
+    'Extrude 1' -> 'Boss extrude').
+
+    Same re-POST-the-whole-feature mechanism as
+    `update_feature_params_and_check`, except it patches the feature's
+    top-level `name` field instead of an entry in `parameters`.
+
+    Args:
+        client: Active OnshapeClient.
+        document_id, workspace_id, element_id: Usual triple.
+        feature_id: Feature to rename.
+        new_name: New display name.
+
+    Returns:
+        FeatureApplyResult with the post-rename featureStatus (renaming
+        doesn't change geometry, so this should always be OK/INFO unless the
+        feature was already broken).
+
+    Raises:
+        ValueError: feature_id not found in the element.
+    """
+    if not feature_id:
+        raise ValueError("feature_id is required")
+
+    base = (
+        f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    features_doc = await client.get(base)
+    features: List[Dict[str, Any]] = features_doc.get("features", []) or []
+
+    target: Optional[Dict[str, Any]] = None
+    for feat in features:
+        if feat.get("featureId") == feature_id:
+            target = feat
+            break
+    if target is None:
+        raise ValueError(
+            f"feature_id {feature_id!r} not found in element. "
+            f"Available ids: {[f.get('featureId') for f in features]}"
+        )
+
+    target["name"] = new_name
+
+    return await apply_feature_and_check(
+        client,
+        document_id,
+        workspace_id,
+        element_id,
+        {"feature": target},
+        operation="update",
+        feature_id=feature_id,
+    )
+
+
 def _extract_error_message(
     state: Dict[str, Any],
     fs_status: Optional[Dict[str, Any]] = None,

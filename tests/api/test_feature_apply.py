@@ -12,6 +12,7 @@ import pytest
 from onshape_mcp.api.feature_apply import (
     apply_assembly_feature_and_check,
     update_feature_params_and_check,
+    rename_feature_and_check,
     FeatureApplyResult,
 )
 
@@ -277,3 +278,70 @@ async def test_update_reports_post_error_status(onshape_client):
     assert result.ok is False
     assert result.status == "ERROR"
     assert "positive" in (result.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_rename_feature_patches_name_and_reposts(onshape_client):
+    """rename_feature_and_check should patch top-level `name`, not `parameters`."""
+    onshape_client.get = AsyncMock(
+        return_value={"features": [_extrude_feature(feature_id="fId")]}
+    )
+    onshape_client.post = AsyncMock(
+        return_value={
+            "feature": {"featureId": "fId", "name": "Boss extrude", "featureType": "extrude"},
+            "featureState": {"featureStatus": "OK"},
+        }
+    )
+
+    result = await rename_feature_and_check(
+        onshape_client, "d", "w", "e", "fId", "Boss extrude",
+    )
+
+    assert isinstance(result, FeatureApplyResult)
+    assert result.ok is True
+    assert result.feature_name == "Boss extrude"
+
+    posted_path = onshape_client.post.await_args[0][0]
+    assert posted_path.endswith("/features/featureid/fId")
+
+    sent_payload = onshape_client.post.await_args[1]["data"]
+    assert sent_payload["feature"]["name"] == "Boss extrude"
+    # Parameters must be untouched by a rename.
+    assert sent_payload["feature"]["parameters"] == _extrude_feature(feature_id="fId")["parameters"]
+
+
+@pytest.mark.asyncio
+async def test_rename_feature_raises_for_unknown_feature(onshape_client):
+    onshape_client.get = AsyncMock(return_value={"features": []})
+    onshape_client.post = AsyncMock()
+    with pytest.raises(ValueError) as exc:
+        await rename_feature_and_check(onshape_client, "d", "w", "e", "missing", "New name")
+    assert "not found" in str(exc.value)
+    onshape_client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rename_feature_rejects_missing_feature_id(onshape_client):
+    onshape_client.get = AsyncMock(return_value={"features": [_extrude_feature()]})
+    onshape_client.post = AsyncMock()
+    with pytest.raises(ValueError):
+        await rename_feature_and_check(onshape_client, "d", "w", "e", "", "New name")
+    onshape_client.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rename_feature_reports_post_error_status(onshape_client):
+    """A rename can still surface ERROR if the feature was already broken."""
+    onshape_client.get = AsyncMock(
+        return_value={"features": [_extrude_feature(feature_id="fId")]}
+    )
+    onshape_client.post = AsyncMock(
+        return_value={
+            "feature": {"featureId": "fId"},
+            "featureState": {"featureStatus": "ERROR", "message": "Depth must be positive"},
+        }
+    )
+
+    result = await rename_feature_and_check(onshape_client, "d", "w", "e", "fId", "New name")
+    assert result.ok is False
+    assert result.status == "ERROR"

@@ -5,7 +5,7 @@ import sys
 import asyncio
 import base64
 import json
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 import httpx
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -34,6 +34,7 @@ from .api.feature_apply import (
     apply_feature_and_check,
     apply_assembly_feature_and_check,
     update_feature_params_and_check,
+    rename_feature_and_check,
     FeatureApplyResult,
 )
 from .api.entities import EntityManager
@@ -567,6 +568,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="rename_feature",
+            description=(
+                "Rename a feature in the feature tree (e.g. 'Extrude 1' -> "
+                "'Boss extrude'). Purely a label change — geometry is "
+                "untouched. Returns the standard {ok, status, feature_id, "
+                "feature_name, ...} contract."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Part Studio element ID"},
+                    "featureId": {"type": "string", "description": "ID of the feature to rename"},
+                    "newName": {"type": "string", "description": "New display name for the feature"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "featureId", "newName"],
+            },
+        ),
+        Tool(
             name="list_documents",
             description="List documents in your Onshape account with optional filtering and sorting",
             inputSchema={
@@ -731,6 +752,35 @@ async def list_tools() -> list[Tool]:
                     "documentId": {"type": "string", "description": "Document ID to delete"},
                 },
                 "required": ["documentId"],
+            },
+        ),
+        Tool(
+            name="rename_document",
+            description="Rename an existing Onshape document. Returns {ok, document_id, document_name}.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID to rename"},
+                    "newName": {"type": "string", "description": "New name for the document"},
+                },
+                "required": ["documentId", "newName"],
+            },
+        ),
+        Tool(
+            name="rename_element",
+            description=(
+                "Rename an element (a document tab — Part Studio, Assembly, "
+                "drawing, etc.). Returns {ok, element_id, element_name}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "documentId": {"type": "string", "description": "Document ID"},
+                    "workspaceId": {"type": "string", "description": "Workspace ID"},
+                    "elementId": {"type": "string", "description": "Element ID to rename"},
+                    "newName": {"type": "string", "description": "New display name for the element"},
+                },
+                "required": ["documentId", "workspaceId", "elementId", "newName"],
             },
         ),
         Tool(
@@ -3228,6 +3278,23 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             logger.exception("Unexpected error updating feature")
             return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
 
+    elif name == "rename_feature":
+        try:
+            result = await rename_feature_and_check(
+                client,
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["featureId"],
+                arguments["newName"],
+            )
+            return [TextContent(type="text", text=_feature_apply_json(result, tool_name=name))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name, status_code=e.response.status_code))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming feature")
+            return [TextContent(type="text", text=_exception_json(e, tool_name=name))]
+
     elif name == "list_documents":
         try:
             # Map filter type to API value
@@ -3676,6 +3743,73 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                 "ok": False,
                 "status": "EXCEPTION",
                 "document_id": arguments["documentId"],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
+
+    elif name == "rename_document":
+        try:
+            doc = await document_manager.rename_document(
+                arguments["documentId"], arguments["newName"]
+            )
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "document_id": doc.id,
+                "document_name": doc.name,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": f"HTTP {e.response.status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming document")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "document_id": arguments["documentId"],
+                "error_message": str(e),
+                "tool": name,
+            }, indent=2))]
+
+    elif name == "rename_element":
+        try:
+            new_name = await document_manager.rename_element(
+                arguments["documentId"],
+                arguments["workspaceId"],
+                arguments["elementId"],
+                arguments["newName"],
+            )
+            payload = {
+                "ok": True,
+                "status": "OK",
+                "element_id": arguments["elementId"],
+                "element_name": new_name,
+                "error_message": None,
+                "tool": name,
+            }
+            return [TextContent(type="text", text=json.dumps(payload, indent=2))]
+        except httpx.HTTPStatusError as e:
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": arguments["elementId"],
+                "error_message": f"HTTP {e.response.status_code}: {e}",
+                "tool": name,
+            }, indent=2))]
+        except Exception as e:
+            logger.exception("Unexpected error renaming element")
+            return [TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "status": "EXCEPTION",
+                "element_id": arguments["elementId"],
                 "error_message": str(e),
                 "tool": name,
             }, indent=2))]

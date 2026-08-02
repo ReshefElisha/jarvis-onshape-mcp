@@ -311,6 +311,93 @@ class DocumentManager:
             thumbnail=thumbnail_url,
         )
 
+    async def rename_document(self, document_id: str, new_name: str) -> DocumentInfo:
+        """Rename an existing document.
+
+        Args:
+            document_id: Document ID
+            new_name: New name for the document
+
+        Returns:
+            Updated DocumentInfo
+        """
+        response = await self.client.post(
+            f"/api/v10/documents/{document_id}", data={"name": new_name}
+        )
+
+        thumbnail_data = response.get("thumbnail")
+        thumbnail_url = None
+        if thumbnail_data and isinstance(thumbnail_data, dict):
+            thumbnail_url = thumbnail_data.get("href")
+
+        return DocumentInfo(
+            id=response.get("id", document_id),
+            name=response.get("name", new_name),
+            createdAt=response.get("createdAt"),
+            modifiedAt=response.get("modifiedAt"),
+            ownerId=response.get("owner", {}).get("id", ""),
+            ownerName=response.get("owner", {}).get("name"),
+            public=response.get("public", False),
+            description=response.get("description"),
+            thumbnail=thumbnail_url,
+        )
+
+    async def rename_element(
+        self, document_id: str, workspace_id: str, element_id: str, new_name: str
+    ) -> str:
+        """Rename an element (Part Studio, Assembly, drawing, etc.) — i.e. a document tab.
+
+        Onshape has no dedicated "rename tab" endpoint; the name lives as a
+        property on the element's Metadata resource. We GET the current
+        metadata, find the property whose schema `name` is "Name" (rather than
+        trusting a hardcoded propertyId, which is a metadata-schema-version
+        detail we shouldn't assume is stable), then POST just that property
+        back.
+
+        Args:
+            document_id: Document ID
+            workspace_id: Workspace ID
+            element_id: Element ID to rename
+            new_name: New display name for the element
+
+        Returns:
+            The new name, as confirmed by Onshape's response.
+
+        Raises:
+            ValueError: if the metadata response has no "Name" property
+                (unexpected shape — surfaced so the caller can inspect it
+                rather than silently no-op renaming).
+        """
+        metadata_path = f"/api/metadata/d/{document_id}/w/{workspace_id}/e/{element_id}"
+        current = await self.client.get(metadata_path)
+
+        properties = current.get("properties") or []
+        name_property_id: Optional[str] = None
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+            if str(prop.get("name", "")).strip().lower() == "name":
+                name_property_id = prop.get("propertyId")
+                break
+
+        if not name_property_id:
+            raise ValueError(
+                "Could not find a 'Name' property in element metadata; "
+                f"available properties: {[p.get('name') for p in properties if isinstance(p, dict)]}"
+            )
+
+        response = await self.client.post(
+            metadata_path,
+            data={"properties": [{"propertyId": name_property_id, "value": new_name}]},
+        )
+
+        updated_properties = response.get("properties") or []
+        for prop in updated_properties:
+            if isinstance(prop, dict) and prop.get("propertyId") == name_property_id:
+                return prop.get("value", new_name)
+
+        return new_name
+
     async def delete_document(self, document_id: str) -> Dict[str, Any]:
         """Delete (trash) a document.
 
