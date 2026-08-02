@@ -15,6 +15,7 @@ from onshape_mcp.api.feature_apply import (
     apply_assembly_feature_and_check,
     update_feature_params_and_check,
     rename_feature_and_check,
+    batch_rename_features_and_check,
     FeatureApplyResult,
 )
 
@@ -433,3 +434,292 @@ class TestConcurrentWritesAreSerializedPerElement:
         )
 
         assert order == ["start", "end", "start", "end"]
+
+
+def _risky_sketch_feature(feature_id: str = "riskyS") -> dict:
+    """Shape lifted from knowledge_base/api/real_sketch_example.json: a
+    non-default plane reference (would normally be a custom-feature-
+    generated face) plus a constraint with an externalFirst ref."""
+    return {
+        "btType": "BTMSketch-151",
+        "featureId": feature_id,
+        "name": "Sketch 1",
+        "parameters": [
+            {
+                "btType": "BTMParameterQueryList-148",
+                "parameterId": "sketchPlane",
+                "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": ["KeKO"]}],
+            }
+        ],
+        "entities": [],
+        "constraints": [
+            {
+                "btType": "BTMSketchConstraint-2",
+                "entityId": "c1",
+                "constraintType": "DISTANCE",
+                "parameters": [
+                    {
+                        "btType": "BTMParameterQueryList-148",
+                        "parameterId": "externalFirst",
+                        "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": ["Kedg"]}],
+                    },
+                ],
+            }
+        ],
+    }
+
+
+def _safe_sketch_feature(feature_id: str = "safeS") -> dict:
+    """Default plane, purely local constraints -- the Sketch 2 shape that
+    renamed clean in the real incident."""
+    return {
+        "btType": "BTMSketch-151",
+        "featureId": feature_id,
+        "name": "Sketch 2",
+        "parameters": [
+            {
+                "btType": "BTMParameterQueryList-148",
+                "parameterId": "sketchPlane",
+                "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": ["JCC"]}],
+            }
+        ],
+        "entities": [],
+        "constraints": [
+            {
+                "btType": "BTMSketchConstraint-2",
+                "entityId": "c1",
+                "constraintType": "LENGTH",
+                "parameters": [
+                    {"btType": "BTMParameterString-149", "value": "e1.bottom", "parameterId": "localFirst"},
+                ],
+            }
+        ],
+    }
+
+
+class TestRenameFeatureSafetyGate:
+    """rename_feature_and_check must refuse a risky sketch by default,
+    proceed with override_safety_check=True, and leave non-risky targets
+    (safe sketches, non-sketch features) completely unaffected."""
+
+    @pytest.mark.asyncio
+    async def test_blocks_risky_sketch_without_override(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock()
+
+        result = await rename_feature_and_check(onshape_client, "d", "w", "e", "s1", "New name")
+
+        assert result.ok is False
+        assert result.status == "BLOCKED"
+        assert "s1" in result.error_message or "New name" not in (result.error_message or "")
+        onshape_client.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_proceeds_with_override_safety_check(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s1", "name": "New name", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await rename_feature_and_check(
+            onshape_client, "d", "w", "e", "s1", "New name", override_safety_check=True,
+        )
+
+        assert result.ok is True
+        assert result.status == "OK"
+        onshape_client.post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ignores_safe_sketch(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_safe_sketch_feature("s2")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s2", "name": "New name", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await rename_feature_and_check(onshape_client, "d", "w", "e", "s2", "New name")
+
+        assert result.ok is True
+        onshape_client.post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ignores_non_sketch_feature(self, onshape_client):
+        """Regression check: a plain extrude must be unaffected by the gate."""
+        onshape_client.get = AsyncMock(return_value={"features": [_extrude_feature(feature_id="fId")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "fId", "name": "New name", "featureType": "extrude"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await rename_feature_and_check(onshape_client, "d", "w", "e", "fId", "New name")
+
+        assert result.ok is True
+        onshape_client.post.assert_awaited_once()
+
+
+class TestUpdateFeatureSafetyGate:
+    """Same gate, same contract, for update_feature_params_and_check."""
+
+    @pytest.mark.asyncio
+    async def test_blocks_risky_sketch_without_override(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock()
+
+        result = await update_feature_params_and_check(
+            onshape_client, "d", "w", "e", "s1",
+            [{"parameterId": "sketchPlane"}],
+        )
+
+        assert result.ok is False
+        assert result.status == "BLOCKED"
+        onshape_client.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_proceeds_with_override_safety_check(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s1", "name": "Sketch 1", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await update_feature_params_and_check(
+            onshape_client, "d", "w", "e", "s1",
+            [{"parameterId": "sketchPlane"}],
+            override_safety_check=True,
+        )
+
+        assert result.ok is True
+        onshape_client.post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ignores_non_sketch_feature(self, onshape_client):
+        """Regression check against the already-passing extrude-update tests."""
+        onshape_client.get = AsyncMock(
+            return_value={"features": [_extrude_feature(depth_expr="10 mm", depth_value=0.01)]}
+        )
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "fId", "name": "Extrude 10mm", "featureType": "extrude"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        result = await update_feature_params_and_check(
+            onshape_client, "d", "w", "e", "fId",
+            [{"parameterId": "depth", "expression": "15 mm"}],
+        )
+
+        assert result.ok is True
+        onshape_client.post.assert_awaited_once()
+
+
+class TestBatchRenameFeatures:
+    @pytest.mark.asyncio
+    async def test_sequential_order_not_parallel(self, onshape_client):
+        """GETs/POSTs for each item must complete before the next starts."""
+        order = []
+
+        async def fake_get(path, params=None):
+            order.append("get-start")
+            await asyncio.sleep(0.01)
+            order.append("get-end")
+            return {"features": [_safe_sketch_feature("s1"), _safe_sketch_feature("s2")]}
+
+        async def fake_post(path, data=None, params=None):
+            order.append("post-start")
+            await asyncio.sleep(0.01)
+            order.append("post-end")
+            return {
+                "feature": {"featureId": "x", "name": "x", "featureType": "BTMSketch-151"},
+                "featureState": {"featureStatus": "OK"},
+            }
+
+        onshape_client.get = fake_get
+        onshape_client.post = fake_post
+
+        await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [{"featureId": "s1", "newName": "A"}, {"featureId": "s2", "newName": "B"}],
+        )
+
+        # Each item's get+post pair must fully complete before the next
+        # item's begins -- never two "start"s back to back.
+        assert order == [
+            "get-start", "get-end", "post-start", "post-end",
+            "get-start", "get-end", "post-start", "post-end",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_mixed_outcomes_reported_per_item(self, onshape_client):
+        """One OK, one BLOCKED (risky sketch), one ERROR (Onshape-reported)."""
+        get_responses = [
+            {"features": [_safe_sketch_feature("ok1")]},
+            {"features": [_risky_sketch_feature("blocked1")]},
+            {"features": [_safe_sketch_feature("err1")]},
+        ]
+        onshape_client.get = AsyncMock(side_effect=get_responses)
+        # post is only called for ok1 and err1 -- blocked1 never reaches it.
+        onshape_client.post = AsyncMock(side_effect=[
+            {
+                "feature": {"featureId": "ok1", "name": "x", "featureType": "BTMSketch-151"},
+                "featureState": {"featureStatus": "OK"},
+            },
+            {
+                "feature": {"featureId": "err1", "name": "x", "featureType": "BTMSketch-151"},
+                "featureState": {"featureStatus": "ERROR", "message": "boom"},
+            },
+        ])
+
+        results = await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [
+                {"featureId": "ok1", "newName": "A"},
+                {"featureId": "blocked1", "newName": "B"},
+                {"featureId": "err1", "newName": "C"},
+            ],
+        )
+
+        assert len(results) == 3
+        assert results[0]["ok"] is True
+        assert results[0]["status"] == "OK"
+        assert results[1]["ok"] is False
+        assert results[1]["status"] == "BLOCKED"
+        assert results[2]["ok"] is False
+        assert results[2]["status"] == "ERROR"
+
+    @pytest.mark.asyncio
+    async def test_bad_item_does_not_abort_the_batch(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_safe_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s1", "name": "x", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        results = await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [
+                {"featureId": "", "newName": "A"},  # bad: empty featureId
+                {"featureId": "s1", "newName": "B"},
+            ],
+        )
+
+        assert len(results) == 2
+        assert results[0]["ok"] is False
+        assert results[0]["status"] == "ERROR"
+        assert results[1]["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_override_safety_check_applies_to_whole_batch(self, onshape_client):
+        onshape_client.get = AsyncMock(return_value={"features": [_risky_sketch_feature("s1")]})
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "s1", "name": "x", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        results = await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [{"featureId": "s1", "newName": "A"}],
+            override_safety_check=True,
+        )
+
+        assert results[0]["ok"] is True
+        onshape_client.post.assert_awaited_once()

@@ -131,6 +131,9 @@ class TestListTools:
         assert "create_linear_pattern" in tool_names
         assert "create_circular_pattern" in tool_names
         assert "create_boolean" in tool_names
+        assert "update_feature" in tool_names
+        assert "rename_feature" in tool_names
+        assert "batch_rename_features" in tool_names
 
     @pytest.mark.asyncio
     async def test_list_tools_includes_featurescript_tools(self):

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from .client import OnshapeClient
 from .feature_apply import FeatureApplyResult, apply_feature_and_check
+from .sketch_inspect import assess_sketch_risk
 
 
 class CascadedRemoval(BaseModel):
@@ -254,6 +255,7 @@ async def edit_sketch(
     add_entities: Optional[List[Dict[str, Any]]] = None,
     add_constraints: Optional[List[Dict[str, Any]]] = None,
     remove_ids: Optional[List[str]] = None,
+    override_safety_check: bool = False,
 ) -> EditSketchResult:
     """Fetch + merge + post a sketch edit.
 
@@ -268,10 +270,17 @@ async def edit_sketch(
             AND constraint ids; any constraint referencing a removed
             entity (directly or via `id.subpoint`) cascades out and is
             reported in `cascaded_removals`.
+        override_safety_check: If this sketch has external geometry
+            references (non-default plane, or a constraint bound to
+            geometry outside its own entities), the edit is blocked by
+            default (see `assess_sketch_risk` in `sketch_inspect.py`) —
+            confirmed to corrupt the model when re-POSTed via this
+            mechanism. Pass True to force it through.
 
     Returns:
         EditSketchResult with the underlying apply outcome plus a
-        per-id diff log.
+        per-id diff log. `apply.status == "BLOCKED"` if the safety check
+        refused to send it (nothing added/removed/cascaded in that case).
 
     Raises:
         ValueError: id collision on addEntities / addConstraints, or no
@@ -311,6 +320,29 @@ async def edit_sketch(
             f"feature {sketch_feature_id!r} is btType={target.get('btType')!r}, "
             f"not BTMSketch-151 -- edit_sketch only edits sketch features."
         )
+
+    if not override_safety_check:
+        risk = assess_sketch_risk(features_doc, sketch_feature_id)
+        if risk and risk["risky"]:
+            return EditSketchResult(
+                apply=FeatureApplyResult(
+                    ok=False,
+                    status="BLOCKED",
+                    feature_id=sketch_feature_id,
+                    feature_name=target.get("name") or "",
+                    feature_type="BTMSketch-151",
+                    error_message=(
+                        f"BLOCKED by safety check (nothing was sent to Onshape): "
+                        f"{risk['summary']} Onshape's REST feature-patch mechanism "
+                        f"(GET the full feature, patch entities/constraints, POST "
+                        f"it back) is confirmed to corrupt sketches like this one. "
+                        f"Call inspect_sketch on featureId {sketch_feature_id!r} "
+                        f"to review the exact plane/constraint references, then "
+                        f"retry with override_safety_check=True if you still want "
+                        f"to proceed."
+                    ),
+                ),
+            )
 
     existing_entities = list(target.get("entities") or [])
     existing_constraints = list(target.get("constraints") or [])
