@@ -9,12 +9,24 @@ Routing every feature mutation through `apply_feature_and_check` gives callers
 Evidence for the response shape used here is captured in
 `scratchpad/smoke-test.md` and `scratchpad/probe-patch-and-shadedviews.md`
 in the parent project (`/Users/shef/projects/onshape-mcp/`).
+
+Also serializes the mutating POST per (document, workspace, element) — see
+`_get_element_lock`. Onshape's feature-tree endpoint applies each write
+against a base microversion and regenerates downstream features from there;
+firing concurrent mutating calls at the same Part Studio (e.g. a batch of
+parallel renames) lets them race on that base and corrupts the tree even
+though each individual call is a no-op on geometry. Confirmed live: 20
+parallel `rename_feature` calls against one Part Studio put 21 of 23
+features into ERROR/WARNING and visibly collapsed the model (recovered via
+Onshape's version history). Reads aren't locked, only the write.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, Dict, List, Literal, Optional
+from collections import defaultdict
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -23,6 +35,19 @@ from .client import OnshapeClient
 
 
 FeatureStatus = Literal["OK", "INFO", "WARNING", "ERROR", "UNKNOWN"]
+
+# One lock per (document_id, workspace_id, element_id), created lazily.
+# defaultdict's __getitem__ is a single synchronous dict op with no `await`
+# inside, so it's safe to call from multiple concurrent asyncio tasks without
+# its own lock — no two tasks can interleave mid-lookup on one event loop.
+_element_locks: "defaultdict[Tuple[str, str, str], asyncio.Lock]" = defaultdict(
+    asyncio.Lock
+)
+
+
+def _get_element_lock(document_id: str, workspace_id: str, element_id: str) -> asyncio.Lock:
+    """Return the lock guarding mutating writes to this Part Studio/Assembly."""
+    return _element_locks[(document_id, workspace_id, element_id)]
 
 
 class FeatureApplyResult(BaseModel):
@@ -111,7 +136,8 @@ async def apply_feature_and_check(
             logger.warning(f"track_changes: before-snapshot failed ({e}); skipping diff")
             bodies_before = None
 
-    response = await client.post(path, data=feature_payload)
+    async with _get_element_lock(document_id, workspace_id, element_id):
+        response = await client.post(path, data=feature_payload)
 
     # Primary source: top-level featureState in the POST response.
     state = response.get("featureState") if isinstance(response, dict) else None
@@ -220,7 +246,8 @@ async def apply_assembly_feature_and_check(
     )
     path = base if operation == "create" else f"{base}/featureid/{feature_id}"
 
-    response = await client.post(path, data=feature_payload)
+    async with _get_element_lock(document_id, workspace_id, element_id):
+        response = await client.post(path, data=feature_payload)
 
     state = response.get("featureState") if isinstance(response, dict) else None
     feature = response.get("feature", {}) if isinstance(response, dict) else {}

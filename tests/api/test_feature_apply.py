@@ -5,11 +5,13 @@ tests/real/test_feature_apply_real.py; these tests pin the
 param-merge behavior of the update helper without hitting Onshape.
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
 from onshape_mcp.api.feature_apply import (
+    apply_feature_and_check,
     apply_assembly_feature_and_check,
     update_feature_params_and_check,
     rename_feature_and_check,
@@ -345,3 +347,89 @@ async def test_rename_feature_reports_post_error_status(onshape_client):
     result = await rename_feature_and_check(onshape_client, "d", "w", "e", "fId", "New name")
     assert result.ok is False
     assert result.status == "ERROR"
+
+
+class TestConcurrentWritesAreSerializedPerElement:
+    """Regression coverage for a real incident: 20 `rename_feature` calls
+    fired in parallel against one Part Studio raced on Onshape's server-side
+    base-microversion regeneration and put 21/23 features into ERROR/WARNING,
+    visibly collapsing the model (recovered via Onshape's version history).
+    apply_feature_and_check now serializes its mutating POST per
+    (document, workspace, element) so concurrent calls queue instead of
+    racing Onshape's API directly.
+    """
+
+    @pytest.mark.asyncio
+    async def test_same_element_writes_are_serialized(self, onshape_client):
+        order = []
+
+        async def fake_post(path, data=None, params=None):
+            order.append("start")
+            await asyncio.sleep(0.02)
+            order.append("end")
+            return {
+                "feature": {"featureId": "f", "name": "x", "featureType": "extrude"},
+                "featureState": {"featureStatus": "OK"},
+            }
+
+        onshape_client.post = fake_post
+
+        await asyncio.gather(
+            apply_feature_and_check(onshape_client, "d", "w", "e", {"feature": {}}),
+            apply_feature_and_check(onshape_client, "d", "w", "e", {"feature": {}}),
+        )
+
+        # Serialized: the second POST can't start until the first fully ends.
+        # A racy implementation would interleave as ["start", "start", "end", "end"].
+        assert order == ["start", "end", "start", "end"]
+
+    @pytest.mark.asyncio
+    async def test_different_elements_are_not_serialized_against_each_other(
+        self, onshape_client
+    ):
+        """The lock is per-element, not global -- unrelated Part Studios
+        must not queue behind each other."""
+        concurrent = 0
+        max_concurrent = 0
+
+        async def fake_post(path, data=None, params=None):
+            nonlocal concurrent, max_concurrent
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+            await asyncio.sleep(0.02)
+            concurrent -= 1
+            return {
+                "feature": {"featureId": "f", "name": "x", "featureType": "extrude"},
+                "featureState": {"featureStatus": "OK"},
+            }
+
+        onshape_client.post = fake_post
+
+        await asyncio.gather(
+            apply_feature_and_check(onshape_client, "d", "w", "e1", {"feature": {}}),
+            apply_feature_and_check(onshape_client, "d", "w", "e2", {"feature": {}}),
+        )
+
+        assert max_concurrent == 2
+
+    @pytest.mark.asyncio
+    async def test_assembly_writes_are_serialized_per_element_too(self, onshape_client):
+        order = []
+
+        async def fake_post(path, data=None, params=None):
+            order.append("start")
+            await asyncio.sleep(0.02)
+            order.append("end")
+            return {
+                "feature": {"featureId": "f", "name": "x", "featureType": "mate"},
+                "featureState": {"featureStatus": "OK"},
+            }
+
+        onshape_client.post = fake_post
+
+        await asyncio.gather(
+            apply_assembly_feature_and_check(onshape_client, "d", "w", "asm", {"feature": {}}),
+            apply_assembly_feature_and_check(onshape_client, "d", "w", "asm", {"feature": {}}),
+        )
+
+        assert order == ["start", "end", "start", "end"]
