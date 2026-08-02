@@ -483,6 +483,40 @@ async def rename_feature_and_check(
         f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
     )
     features_doc = await client.get(base)
+
+    return await _rename_from_features_doc(
+        client,
+        document_id,
+        workspace_id,
+        element_id,
+        feature_id,
+        new_name,
+        features_doc=features_doc,
+        override_safety_check=override_safety_check,
+    )
+
+
+async def _rename_from_features_doc(
+    client: OnshapeClient,
+    document_id: str,
+    workspace_id: str,
+    element_id: str,
+    feature_id: str,
+    new_name: str,
+    *,
+    features_doc: Dict[str, Any],
+    override_safety_check: bool = False,
+) -> FeatureApplyResult:
+    """Rename one feature using an ALREADY-FETCHED /features response.
+
+    Split out of `rename_feature_and_check` so a batch can pay for the
+    (large) GET once instead of once per item — see
+    `batch_rename_features_and_check` for why that matters.
+
+    The caller owns the fetch; this function never issues a GET. It does
+    not mutate `features_doc`: the target feature is shallow-copied before
+    its `name` is patched, so a shared doc stays clean for later items.
+    """
     features: List[Dict[str, Any]] = features_doc.get("features", []) or []
 
     target: Optional[Dict[str, Any]] = None
@@ -517,14 +551,19 @@ async def rename_feature_and_check(
                 ),
             )
 
-    target["name"] = new_name
+    # Shallow copy so a shared features_doc isn't left mutated for the next
+    # item in a batch. Only the top-level `name` changes, so a shallow copy
+    # is sufficient -- nested parameters/entities are re-sent unchanged by
+    # reference, which is exactly the semantics we want.
+    patched = dict(target)
+    patched["name"] = new_name
 
     return await apply_feature_and_check(
         client,
         document_id,
         workspace_id,
         element_id,
-        {"feature": target},
+        {"feature": patched},
         operation="update",
         feature_id=feature_id,
     )
@@ -548,13 +587,28 @@ async def batch_rename_features_and_check(
     for the general-purpose fix; this is belt-and-suspenders by construction
     for the specific "batch rename" use case).
 
-    Each item is attempted independently via `rename_feature_and_check`
-    (so it gets the same safety-check gate): a risky sketch (status=BLOCKED)
-    or an Onshape-side error on one item does not abort the rest of the
-    batch. Each item does its own fresh GET+POST (not a shared
-    pre-fetched features_doc), so an N-item batch costs N GETs + N POSTs —
-    accepted cost; the upside is each rename sees the freshest
-    post-previous-mutation state within the same batch.
+    Each item is attempted independently and gets the same safety-check
+    gate: a risky sketch (status=BLOCKED) or an Onshape-side error on one
+    item does not abort the rest of the batch.
+
+    Fetches `/features` ONCE for the whole batch rather than once per item.
+    This matters a lot in practice: the feature list on a real Part Studio
+    runs ~500 KB while a single rename's POST body is ~15 KB, so a
+    per-item fetch makes an N-item batch cost roughly N x 500 KB. A live
+    15-item batch did exactly that (~8 MB through one endpoint in ~2
+    minutes) and exhausted an Onshape-side quota on
+    `/partstudios/.../features` — 8 items landed, the remaining 7 got HTTP
+    429 and the endpoint stayed throttled for hours. Sharing the fetch cuts
+    that to one ~500 KB read plus N small writes.
+
+    Tradeoff of the shared fetch, stated plainly: every item is patched
+    from a snapshot taken before the batch started, rather than from state
+    refreshed after the previous item's write. For renames specifically
+    that is sound — a rename changes only the target feature's top-level
+    `name`, so it cannot invalidate any OTHER feature's body in the
+    snapshot, and each item targets a different featureId. Do not
+    generalize this to batched operations that change geometry, where a
+    stale snapshot genuinely could go wrong.
 
     Args:
         client: Active OnshapeClient.
@@ -566,6 +620,11 @@ async def batch_rename_features_and_check(
         List of per-item result dicts: {featureId, requestedName, ok,
         status, feature_name, error_message}, one per input item, in order.
     """
+    base = (
+        f"/api/v9/partstudios/d/{document_id}/w/{workspace_id}/e/{element_id}/features"
+    )
+    features_doc = await client.get(base)
+
     results: List[Dict[str, Any]] = []
     for item in renames:
         feature_id = item.get("featureId") if isinstance(item, dict) else None
@@ -584,13 +643,14 @@ async def batch_rename_features_and_check(
             })
             continue
         try:
-            result = await rename_feature_and_check(
+            result = await _rename_from_features_doc(
                 client,
                 document_id,
                 workspace_id,
                 element_id,
                 feature_id,
                 new_name,
+                features_doc=features_doc,
                 override_safety_check=override_safety_check,
             )
             results.append({

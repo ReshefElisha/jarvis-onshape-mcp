@@ -615,7 +615,8 @@ class TestUpdateFeatureSafetyGate:
 class TestBatchRenameFeatures:
     @pytest.mark.asyncio
     async def test_sequential_order_not_parallel(self, onshape_client):
-        """GETs/POSTs for each item must complete before the next starts."""
+        """One shared GET up front, then each item's POST completes before
+        the next begins (sequential, never overlapping)."""
         order = []
 
         async def fake_get(path, params=None):
@@ -641,22 +642,74 @@ class TestBatchRenameFeatures:
             [{"featureId": "s1", "newName": "A"}, {"featureId": "s2", "newName": "B"}],
         )
 
-        # Each item's get+post pair must fully complete before the next
-        # item's begins -- never two "start"s back to back.
         assert order == [
-            "get-start", "get-end", "post-start", "post-end",
-            "get-start", "get-end", "post-start", "post-end",
+            "get-start", "get-end",
+            "post-start", "post-end",
+            "post-start", "post-end",
         ]
+
+    @pytest.mark.asyncio
+    async def test_fetches_features_only_once_for_whole_batch(self, onshape_client):
+        """Regression guard for a real incident: per-item fetching sent ~8 MB
+        through /partstudios/.../features for a 15-item batch and exhausted an
+        Onshape-side quota (HTTP 429, throttled for hours). The batch must pay
+        for exactly one GET no matter how many items it renames."""
+        onshape_client.get = AsyncMock(return_value={
+            "features": [_safe_sketch_feature(f"s{i}") for i in range(10)]
+        })
+        onshape_client.post = AsyncMock(return_value={
+            "feature": {"featureId": "x", "name": "x", "featureType": "BTMSketch-151"},
+            "featureState": {"featureStatus": "OK"},
+        })
+
+        results = await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [{"featureId": f"s{i}", "newName": f"N{i}"} for i in range(10)],
+        )
+
+        assert len(results) == 10
+        assert all(r["ok"] for r in results)
+        assert onshape_client.get.await_count == 1
+        assert onshape_client.post.await_count == 10
+
+    @pytest.mark.asyncio
+    async def test_shared_features_doc_is_not_mutated_between_items(self, onshape_client):
+        """Each item patches a COPY of its target, so a shared snapshot stays
+        clean -- otherwise item N's rename would leak into the doc that items
+        N+1.. are read from."""
+        doc = {"features": [_safe_sketch_feature("s1"), _safe_sketch_feature("s2")]}
+        original_names = [f["name"] for f in doc["features"]]
+
+        onshape_client.get = AsyncMock(return_value=doc)
+        posted_names = []
+
+        async def fake_post(path, data=None, params=None):
+            posted_names.append(data["feature"]["name"])
+            return {
+                "feature": {"featureId": "x", "name": "x", "featureType": "BTMSketch-151"},
+                "featureState": {"featureStatus": "OK"},
+            }
+
+        onshape_client.post = fake_post
+
+        await batch_rename_features_and_check(
+            onshape_client, "d", "w", "e",
+            [{"featureId": "s1", "newName": "Renamed A"}, {"featureId": "s2", "newName": "Renamed B"}],
+        )
+
+        # Each POST carried its own new name...
+        assert posted_names == ["Renamed A", "Renamed B"]
+        # ...and the shared snapshot still holds the pre-batch names.
+        assert [f["name"] for f in doc["features"]] == original_names
 
     @pytest.mark.asyncio
     async def test_mixed_outcomes_reported_per_item(self, onshape_client):
         """One OK, one BLOCKED (risky sketch), one ERROR (Onshape-reported)."""
-        get_responses = [
-            {"features": [_safe_sketch_feature("ok1")]},
-            {"features": [_risky_sketch_feature("blocked1")]},
-            {"features": [_safe_sketch_feature("err1")]},
-        ]
-        onshape_client.get = AsyncMock(side_effect=get_responses)
+        onshape_client.get = AsyncMock(return_value={"features": [
+            _safe_sketch_feature("ok1"),
+            _risky_sketch_feature("blocked1"),
+            _safe_sketch_feature("err1"),
+        ]})
         # post is only called for ok1 and err1 -- blocked1 never reaches it.
         onshape_client.post = AsyncMock(side_effect=[
             {
